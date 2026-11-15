@@ -25,7 +25,7 @@ const CAMERA_PRESETS: Record<
   { pos: [number, number, number]; target: [number, number, number] }
 > = {
   overview: { pos: [0.2, 5.1, 6.4], target: [0, 0.55, 0] },
-  needle: { pos: [2.5, 2.25, 2.85], target: [0.55, 0.92, 0.35] },
+  needle: { pos: [2.45, 2.2, 2.85], target: [0.48, 0.98, 0.68] },
   label: { pos: [-0.45, 3.6, 2.3], target: [-0.45, 0.88, 0.05] },
   top: { pos: [0, 7.6, 0.6], target: [0, 0.55, 0] },
 };
@@ -70,8 +70,8 @@ export class TurntableScene {
   private rpm: RpmMode = 33;
   private dustCoverOpen = true;
   private platterSpeed = 0;
-  private targetArmYaw = -0.38;
-  private targetArmPitch = -0.055;
+  private targetArmYaw = 0.02;
+  private targetArmPitch = -0.025;
   private discLiftOffset = 0;
   private discLiftPhase: 'idle' | 'lifting' | 'dropping' = 'idle';
   private pendingDisc: VinylDisc | null = null;
@@ -429,16 +429,16 @@ export class TurntableScene {
     gimbalRing.position.y = 0.2;
     tonearmPivot.add(gimbalRing);
 
-    // Tonearm rest post (to the front-left of pivot)
-    const restPostGeo = new THREE.CylinderGeometry(0.032, 0.04, 0.22, 16);
+    // Tonearm rest post (aligned under parked arm outside platter)
+    const restPostGeo = new THREE.CylinderGeometry(0.032, 0.04, 0.34, 16);
     const restPost = new THREE.Mesh(restPostGeo, deckMat);
-    restPost.position.set(1.36, 0.9, -0.35);
+    restPost.position.set(1.82, 0.96, 0.29);
     turntable.add(restPost);
 
-    const restCradleGeo = new THREE.TorusGeometry(0.05, 0.015, 8, 20, Math.PI);
+    const restCradleGeo = new THREE.TorusGeometry(0.055, 0.015, 8, 20, Math.PI);
     restCradleGeo.rotateZ(Math.PI);
     const restCradle = new THREE.Mesh(restCradleGeo, brassMat);
-    restCradle.position.set(1.36, 1.02, -0.35);
+    restCradle.position.set(1.82, 1.13, 0.29);
     turntable.add(restCradle);
 
     // Cueing lever
@@ -451,6 +451,8 @@ export class TurntableScene {
 
     this.tonearmArm = new THREE.Group();
     this.tonearmArm.position.y = 0.3;
+    this.tonearmArm.rotation.y = this.targetArmYaw;
+    this.tonearmArm.rotation.x = this.targetArmPitch;
     tonearmPivot.add(this.tonearmArm);
 
     const chromeMat = new THREE.MeshStandardMaterial({
@@ -489,7 +491,7 @@ export class TurntableScene {
     // Headshell + finger lift + cartridge + ruby stylus
     const headshellGroup = new THREE.Group();
     headshellGroup.position.set(-0.14, 0.012, 2.08);
-    headshellGroup.rotation.y = 0.36;
+    headshellGroup.rotation.y = -0.26;
     this.tonearmArm.add(headshellGroup);
 
     const headshellGeo = new THREE.BoxGeometry(0.15, 0.045, 0.32);
@@ -756,13 +758,13 @@ export class TurntableScene {
   public setPlaying(playing: boolean): void {
     this.isPlaying = playing;
     if (playing) {
-      this.targetArmYaw = 0.25;
-      this.targetArmPitch = 0.048;
+      this.targetArmYaw = -0.56;
+      this.targetArmPitch = 0.008;
       this.ledMat.emissiveIntensity = 2.6;
       this.strobeLightMat.emissiveIntensity = 2.4;
     } else {
-      this.targetArmYaw = -0.38;
-      this.targetArmPitch = -0.055;
+      this.targetArmYaw = 0.02;
+      this.targetArmPitch = -0.025;
       this.ledMat.emissiveIntensity = 0.25;
       this.strobeLightMat.emissiveIntensity = 0.2;
     }
