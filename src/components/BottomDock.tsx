@@ -11,6 +11,8 @@ import {
   Volume2,
   VolumeX,
   Sparkles,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import type {
   AudioPlaybackStatus,
@@ -41,6 +43,8 @@ interface BottomDockProps {
   onToggleCrackle: () => void;
   onChangeVolume: (val: number) => void;
   onSelectCameraPreset: (preset: CameraPreset) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
   onSeek: (seconds: number) => void;
 }
 
@@ -79,6 +83,8 @@ export function BottomDock({
   onToggleCrackle,
   onChangeVolume,
   onSelectCameraPreset,
+  onZoomIn,
+  onZoomOut,
   onSeek,
 }: BottomDockProps) {
   const currentDisc = discs[currentIndex] ?? discs[0];
@@ -252,23 +258,48 @@ export function BottomDock({
 
         {/* Bottom Hardware & Camera Bar */}
         <div className="pt-2 border-t border-[#ffe0bd]/10 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-          {/* Camera Angles */}
-          <div className="hidden sm:flex items-center gap-1">
-            <Camera className="w-3.5 h-3.5 text-[#b8a898] mr-1" />
-            {CAMERA_OPTIONS.map((cam) => (
+          {/* Camera Angles & Zoom Controls (mobile + desktop) */}
+          <div className="flex items-center justify-between sm:justify-start gap-1.5 w-full sm:w-auto">
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+              <Camera className="w-3.5 h-3.5 text-[#b8a898] mr-0.5 shrink-0" />
+              {CAMERA_OPTIONS.map((cam) => (
+                <button
+                  key={cam.id}
+                  type="button"
+                  onClick={() => onSelectCameraPreset(cam.id)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    cameraPreset === cam.id
+                      ? 'bg-[#2e231c] text-[#e89f65]'
+                      : 'text-[#b8a898] hover:text-[#f7efe6]'
+                  }`}
+                >
+                  {cam.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0 pl-1 border-l border-[#ffe0bd]/10">
               <button
-                key={cam.id}
                 type="button"
-                onClick={() => onSelectCameraPreset(cam.id)}
-                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                  cameraPreset === cam.id
-                    ? 'bg-[#2e231c] text-[#e89f65]'
-                    : 'text-[#b8a898] hover:text-[#f7efe6]'
-                }`}
+                onClick={onZoomOut}
+                aria-label="Alejar cámara"
+                title="Alejar cámara"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#221a15] border border-[#ffe0bd]/12 text-[#f7efe6] hover:border-[#e89f65]/60 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e89f65]"
               >
-                {cam.label}
+                <ZoomOut className="w-3.5 h-3.5 text-[#e89f65]" />
+                <span className="sm:hidden">Alejar</span>
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={onZoomIn}
+                aria-label="Acercar cámara"
+                title="Acercar cámara"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#221a15] border border-[#ffe0bd]/12 text-[#f7efe6] hover:border-[#e89f65]/60 whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e89f65]"
+              >
+                <ZoomIn className="w-3.5 h-3.5 text-[#e89f65]" />
+                <span className="sm:hidden">Acercar</span>
+              </button>
+            </div>
           </div>
 
           {/* Hardware & Audio Toggles */}

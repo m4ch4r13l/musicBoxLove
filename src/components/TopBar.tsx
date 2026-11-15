@@ -28,14 +28,14 @@ export function TopBar({
           type="button"
           onDoubleClick={onOpenEditor}
           title="Doble clic para abrir el modo creador"
-          className="text-left text-[11px] font-semibold tracking-[0.18em] text-[#e89f65] hover:text-[#f2b07b] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e89f65] rounded"
+          className="text-left text-[11px] font-semibold tracking-[0.18em] text-[#f5b982] hover:text-[#ffd2a6] drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e89f65] rounded"
         >
           {eyebrow}
         </button>
-        <h1 className="font-display text-[26px] sm:text-[38px] font-semibold leading-[1.08] text-[#f7efe6] mt-0.5 [text-wrap:balance] drop-shadow-[0_4px_18px_rgba(0,0,0,0.65)]">
+        <h1 className="font-display text-[26px] sm:text-[38px] font-semibold leading-[1.08] text-[#f7efe6] mt-0.5 [text-wrap:balance] drop-shadow-[0_4px_18px_rgba(0,0,0,0.85)]">
           {title}
         </h1>
-        <p className="hidden sm:block text-[13px] text-[#b8a898] mt-1.5 leading-relaxed max-w-md">
+        <p className="hidden sm:block text-[13px] text-[#e8ddd0] mt-1.5 leading-relaxed max-w-md drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
           {subtitle}
         </p>
       </div>

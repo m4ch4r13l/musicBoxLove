@@ -11,9 +11,15 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { PlinthFinish, TurntableConfig, VinylDisc } from '../types/turntable';
+import type {
+  PlinthFinish,
+  SceneEnvironment,
+  TurntableConfig,
+  VinylDisc,
+} from '../types/turntable';
 import {
   PLINTH_FINISHES,
+  SCENE_ENVIRONMENTS,
   SYNTH_PRESETS,
   VINYL_COLOR_PRESETS,
   sanitizeColor,
@@ -161,7 +167,7 @@ export function EditorDrawer({
                 : 'text-[#b8a898] hover:text-[#f7efe6]'
             }`}
           >
-            Portada y Madera
+            Escenario y Diseño
           </button>
         </div>
       </div>
@@ -216,6 +222,45 @@ export function EditorDrawer({
                 onChange={(e) => updateField('signature', e.target.value)}
                 className="bg-[#221a15] border border-[#ffe0bd]/12 rounded-lg px-3 py-2 text-sm text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
               />
+            </div>
+
+            {/* 3D Scene Environment Selector */}
+            <div className="flex flex-col gap-2 pt-2">
+              <label className="text-[11px] font-medium text-[#b8a898]">
+                Escenario 3D
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {SCENE_ENVIRONMENTS.map((env) => {
+                  const selected = (config.environment ?? 'valley') === env.id;
+                  return (
+                    <button
+                      key={env.id}
+                      type="button"
+                      onClick={() =>
+                        updateField('environment', env.id as SceneEnvironment)
+                      }
+                      className={`flex items-center gap-2.5 p-2.5 rounded-lg border text-left transition-colors cursor-pointer ${
+                        selected
+                          ? 'bg-[#2e231c] border-[#e89f65] text-[#f7efe6]'
+                          : 'bg-[#221a15] border-[#ffe0bd]/10 text-[#b8a898] hover:text-[#f7efe6]'
+                      }`}
+                    >
+                      <span
+                        className="w-5 h-5 rounded-full border border-white/25 shrink-0"
+                        style={{ backgroundColor: env.swatch }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[11px] font-semibold truncate text-[#f7efe6]">
+                          {env.label}
+                        </span>
+                        <span className="block text-[10px] text-[#b8a898] truncate">
+                          {env.desc}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Plinth Wood Finish */}

@@ -1,21 +1,32 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import type { CameraPreset, PlinthFinish, RpmMode, VinylDisc } from '../types/turntable';
+import type { AudioReactiveLevels } from '../audio/vinylAudioEngine';
+import type {
+  CameraPreset,
+  PlinthFinish,
+  RpmMode,
+  SceneEnvironment,
+  VinylDisc,
+} from '../types/turntable';
 import { sanitizeColor } from '../utils/configCodec';
 import {
   createContactShadowTexture,
   createStrobeRimTexture,
-  createTabletopTexture,
   createVinylGroovesTextures,
   createWoodTextures,
   LabelTextureController,
   paintWoodCanvas,
 } from './proceduralTextures';
+import {
+  type EnvironmentStyle,
+  SceneEnvironmentController,
+} from './sceneEnvironments';
 
 export interface TurntableSceneCallbacks {
   onTogglePlay: () => void;
   onToggleRpm: () => void;
+  getAudioLevels?: () => AudioReactiveLevels;
   onContextLost?: () => void;
   onContextRestored?: () => void;
 }
@@ -24,10 +35,10 @@ const CAMERA_PRESETS: Record<
   CameraPreset,
   { pos: [number, number, number]; target: [number, number, number] }
 > = {
-  overview: { pos: [0.2, 5.1, 6.4], target: [0, 0.55, 0] },
+  overview: { pos: [0.2, 6.2, 7.8], target: [0, 0.55, 0] },
   needle: { pos: [2.45, 2.2, 2.85], target: [0.48, 0.98, 0.68] },
   label: { pos: [-0.45, 3.6, 2.3], target: [-0.45, 0.88, 0.05] },
-  top: { pos: [0, 7.6, 0.6], target: [0, 0.55, 0] },
+  top: { pos: [0, 9.2, 0.7], target: [0, 0.55, 0] },
 };
 
 function detectSoftwareWebGL(): boolean {
@@ -49,6 +60,7 @@ function detectSoftwareWebGL(): boolean {
 const _pointer = new THREE.Vector2();
 const _targetCamPos = new THREE.Vector3();
 const _targetLookAt = new THREE.Vector3();
+const _zoomOffset = new THREE.Vector3();
 
 export class TurntableScene {
   private container: HTMLElement;
@@ -81,6 +93,7 @@ export class TurntableScene {
 
   private activeCameraTransition = false;
   private activePreset: CameraPreset = 'overview';
+  private targetZoomDistance: number | null = null;
 
   // Scene references for animation & updates
   private platterGroup: THREE.Group;
@@ -98,6 +111,13 @@ export class TurntableScene {
   private woodMap: THREE.CanvasTexture;
   private labelController: LabelTextureController;
   private ambientParticles: THREE.Points;
+  private particleMat: THREE.ShaderMaterial;
+  private particlePlayingMix = 0;
+  private envController: SceneEnvironmentController;
+  private sceneFog: THREE.FogExp2;
+  private hemiLight: THREE.HemisphereLight;
+  private keyLight: THREE.SpotLight;
+  private rimLight: THREE.PointLight;
 
   // Raycast targets
   private playHitTargets: THREE.Object3D[] = [];
@@ -120,9 +140,10 @@ export class TurntableScene {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x100c0a);
-    this.scene.fog = new THREE.FogExp2(0x100c0a, 0.022);
+    this.sceneFog = new THREE.FogExp2(0x87997a, 0.008);
+    this.scene.fog = this.sceneFog;
 
-    this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 120);
+    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 150);
     const portraitScale = this.getPortraitDistanceScale(aspect);
     this.camera.position.set(
       CAMERA_PRESETS.overview.pos[0] * portraitScale,
@@ -140,7 +161,7 @@ export class TurntableScene {
     );
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 1.08;
     this.renderer.shadowMap.enabled = !this.isSoftwareGl;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -159,48 +180,38 @@ export class TurntableScene {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = !this.isSoftwareGl;
     this.controls.dampingFactor = 0.06;
-    this.controls.minDistance = 2.8;
-    this.controls.maxDistance = 22;
+    this.controls.minDistance = 2.4;
+    this.controls.maxDistance = 55;
+    this.controls.zoomSpeed = 1.4;
     this.controls.maxPolarAngle = Math.PI * 0.46;
     this.controls.minPolarAngle = 0.08;
     this.controls.target.set(...CAMERA_PRESETS.overview.target);
     this.controls.addEventListener('start', () => {
       this.activeCameraTransition = false;
+      this.targetZoomDistance = null;
     });
 
     // Lighting rig: Warm Key + Cool Hemisphere Fill + Warm Rim
-    const hemiLight = new THREE.HemisphereLight(0xcbd8f0, 0x3b2618, 0.65);
-    this.scene.add(hemiLight);
+    this.hemiLight = new THREE.HemisphereLight(0xd6e9ff, 0x4b6930, 1.05);
+    this.scene.add(this.hemiLight);
 
-    const keyLight = new THREE.SpotLight(0xffd7b0, 62, 26, Math.PI / 4, 0.55, 1.8);
-    keyLight.position.set(4.5, 8.2, 4.8);
-    keyLight.castShadow = !this.isSoftwareGl;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    keyLight.shadow.bias = -0.0004;
-    keyLight.shadow.normalBias = 0.02;
-    this.scene.add(keyLight);
+    this.keyLight = new THREE.SpotLight(0xffe4bd, 68, 28, Math.PI / 4, 0.55, 1.8);
+    this.keyLight.position.set(4.5, 8.2, 4.8);
+    this.keyLight.castShadow = !this.isSoftwareGl;
+    this.keyLight.shadow.mapSize.set(1024, 1024);
+    this.keyLight.shadow.bias = -0.0004;
+    this.keyLight.shadow.normalBias = 0.02;
+    this.scene.add(this.keyLight);
 
-    const rimLight = new THREE.PointLight(0xe88b5a, 14, 16, 1.5);
-    rimLight.position.set(-4.6, 3.2, -3.8);
-    this.scene.add(rimLight);
+    this.rimLight = new THREE.PointLight(0xf4b672, 13, 16, 1.5);
+    this.rimLight.position.set(-4.6, 3.2, -3.8);
+    this.scene.add(this.rimLight);
 
     const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
 
-    // Tabletop & Contact Shadow Grounding
-    const tabletopTex = createTabletopTexture(maxAnisotropy);
-    this.disposables.push(tabletopTex);
-    const tabletopGeo = new THREE.CircleGeometry(28, 64);
-    const tabletopMat = new THREE.MeshStandardMaterial({
-      map: tabletopTex,
-      roughness: 0.85,
-      metalness: 0.06,
-    });
-    const tabletop = new THREE.Mesh(tabletopGeo, tabletopMat);
-    tabletop.rotation.x = -Math.PI / 2;
-    tabletop.position.y = 0;
-    tabletop.receiveShadow = true;
-    this.scene.add(tabletop);
-    this.disposables.push(tabletopGeo, tabletopMat);
+    // Dynamic 3D Scenario Environments (default: valley with grass)
+    this.envController = new SceneEnvironmentController(this.scene, maxAnisotropy, 'valley');
+    const initialEnvStyle = this.envController.setEnvironment('valley');
 
     const shadowTex = createContactShadowTexture();
     const shadowGeo = new THREE.PlaneGeometry(7.2, 5.8);
@@ -638,26 +649,106 @@ export class TurntableScene {
 
     this.disposables.push(hingeGeo, acrylicMat, coverGeo);
 
-    // 9. Ambient Warm Dust Motes
-    const particlesCount = 140;
+    // 9. Audio-Reactive Warm Dust Motes (blink & pulse to the music rhythm)
+    const particlesCount = 190;
     const pGeo = new THREE.BufferGeometry();
     const pPos = new Float32Array(particlesCount * 3);
+    const pPhase = new Float32Array(particlesCount);
+    const pBand = new Float32Array(particlesCount);
+    const pScale = new Float32Array(particlesCount);
+
     for (let i = 0; i < particlesCount; i++) {
-      pPos[i * 3] = (Math.random() - 0.5) * 12;
-      pPos[i * 3 + 1] = Math.random() * 5.2 + 0.3;
-      pPos[i * 3 + 2] = (Math.random() - 0.5) * 12;
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 1.8 + Math.random() * 6.2;
+      pPos[i * 3] = Math.cos(angle) * radius;
+      pPos[i * 3 + 1] = Math.random() * 5.2 + 0.35;
+      pPos[i * 3 + 2] = Math.sin(angle) * radius;
+      pPhase[i] = Math.random() * Math.PI * 2;
+      pBand[i] = i % 3 === 0 ? 0.0 : i % 3 === 1 ? 0.5 : 1.0;
+      pScale[i] = 0.55 + Math.random() * 0.7;
     }
+
     pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-    const pMat = new THREE.PointsMaterial({
-      color: 0xffd1a3,
-      size: 0.04,
+    pGeo.setAttribute('aPhase', new THREE.BufferAttribute(pPhase, 1));
+    pGeo.setAttribute('aBand', new THREE.BufferAttribute(pBand, 1));
+    pGeo.setAttribute('aScale', new THREE.BufferAttribute(pScale, 1));
+
+    this.particleMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uPixelRatio: { value: this.renderer.getPixelRatio() },
+        uBass: { value: 0 },
+        uMid: { value: 0 },
+        uHigh: { value: 0 },
+        uPulse: { value: 0 },
+        uPlaying: { value: 0 },
+        uColorA: { value: new THREE.Color(initialEnvStyle.particleColorA) },
+        uColorB: { value: new THREE.Color(initialEnvStyle.particleColorB) },
+      },
+      vertexShader: `
+        attribute float aPhase;
+        attribute float aBand;
+        attribute float aScale;
+
+        uniform float uTime;
+        uniform float uPixelRatio;
+        uniform float uBass;
+        uniform float uMid;
+        uniform float uHigh;
+        uniform float uPulse;
+        uniform float uPlaying;
+
+        varying float vAlpha;
+        varying float vHeat;
+
+        void main() {
+          float bandEnergy = aBand < 0.25 ? uBass : (aBand < 0.75 ? uMid : uHigh);
+          float shimmer = 0.5 + 0.5 * sin(uTime * (1.8 + aBand * 2.4) + aPhase);
+          float beatReact = pow(shimmer, 1.45) * (0.3 + bandEnergy * 0.85 + uPulse * (1.2 - aBand * 0.3));
+          float activity = mix(0.24 * shimmer, beatReact, uPlaying);
+
+          vec3 pos = position;
+          pos.y += sin(uTime * 0.7 + aPhase) * 0.1 + uPulse * 0.07 * (1.0 - aBand * 0.4) * uPlaying;
+          pos.xz *= 1.0 + uPulse * 0.018 * uPlaying;
+
+          vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+
+          float baseSize = mix(7.0, 10.5, uPlaying) + activity * 14.0;
+          float dist = max(-mvPosition.z, 1.2);
+          gl_PointSize = clamp(aScale * baseSize * uPixelRatio * (4.2 / dist), 1.5, 18.0);
+
+          vAlpha = clamp(mix(0.12 + 0.16 * shimmer, 0.08 + activity * 0.62, uPlaying), 0.05, 0.78);
+          vHeat = clamp(bandEnergy * 0.55 + uPulse * 0.8, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColorA;
+        uniform vec3 uColorB;
+        varying float vAlpha;
+        varying float vHeat;
+
+        void main() {
+          vec2 uv = gl_PointCoord - vec2(0.5);
+          float d = length(uv);
+          if (d > 0.5) discard;
+
+          float core = smoothstep(0.5, 0.05, d);
+          float glow = pow(core, 2.2);
+          vec3 color = mix(uColorA, uColorB, vHeat * core);
+
+          gl_FragColor = vec4(color, glow * vAlpha);
+        }
+      `,
       transparent: true,
-      opacity: 0.45,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
-    this.ambientParticles = new THREE.Points(pGeo, pMat);
+
+    this.ambientParticles = new THREE.Points(pGeo, this.particleMat);
     this.scene.add(this.ambientParticles);
-    this.disposables.push(pGeo, pMat);
+    this.disposables.push(pGeo, this.particleMat);
+    this.applyEnvironmentStyle(initialEnvStyle);
 
     // Configure raycast target groups
     this.playHitTargets = [this.tonearmArm, vinylMesh, labelMesh, this.startButtonMesh];
@@ -738,7 +829,7 @@ export class TurntableScene {
   };
 
   private getPortraitDistanceScale(aspect: number): number {
-    return aspect < 1 ? Math.min(2.15, 1.05 / Math.max(aspect, 0.45)) : 1;
+    return aspect < 1 ? Math.min(2.65, 1.18 / Math.max(aspect, 0.42)) : 1;
   }
 
   private handleResize = (): void => {
@@ -748,6 +839,7 @@ export class TurntableScene {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.particleMat.uniforms.uPixelRatio.value = this.renderer.getPixelRatio();
   };
 
   public setDisc(disc: VinylDisc, animateSwap = true): void {
@@ -807,6 +899,26 @@ export class TurntableScene {
     this.woodMap.needsUpdate = true;
   }
 
+  public setEnvironment(environment: SceneEnvironment): void {
+    const style = this.envController.setEnvironment(environment);
+    this.applyEnvironmentStyle(style);
+  }
+
+  private applyEnvironmentStyle(style: EnvironmentStyle): void {
+    this.sceneFog.color.setHex(style.fogColor);
+    this.sceneFog.density = style.fogDensity;
+    this.hemiLight.color.setHex(style.hemiSky);
+    this.hemiLight.groundColor.setHex(style.hemiGround);
+    this.hemiLight.intensity = style.hemiIntensity;
+    this.keyLight.color.setHex(style.keyColor);
+    this.keyLight.intensity = style.keyIntensity;
+    this.rimLight.color.setHex(style.rimColor);
+    this.rimLight.intensity = style.rimIntensity;
+    this.renderer.toneMappingExposure = style.exposure;
+    this.particleMat.uniforms.uColorA.value.setHex(style.particleColorA);
+    this.particleMat.uniforms.uColorB.value.setHex(style.particleColorB);
+  }
+
   public setDustCoverOpen(open: boolean): void {
     this.dustCoverOpen = open;
   }
@@ -814,6 +926,18 @@ export class TurntableScene {
   public setCameraPreset(preset: CameraPreset): void {
     this.activePreset = preset;
     this.activeCameraTransition = true;
+    this.targetZoomDistance = null;
+  }
+
+  public zoomBy(multiplier: number): void {
+    this.activeCameraTransition = false;
+    const currentDist =
+      this.targetZoomDistance ?? this.camera.position.distanceTo(this.controls.target);
+    this.targetZoomDistance = THREE.MathUtils.clamp(
+      currentDist * multiplier,
+      this.controls.minDistance,
+      this.controls.maxDistance
+    );
   }
 
   private afterDraw(cb: () => void): void {
@@ -951,10 +1075,37 @@ export class TurntableScene {
       if (this.camera.position.distanceTo(_targetCamPos) < 0.03) {
         this.activeCameraTransition = false;
       }
+    } else if (this.targetZoomDistance !== null) {
+      _zoomOffset.subVectors(this.camera.position, this.controls.target);
+      const currentDist = _zoomOffset.length();
+      if (currentDist > 0.0001) {
+        const nextDist = THREE.MathUtils.damp(currentDist, this.targetZoomDistance, 9, dt);
+        _zoomOffset.multiplyScalar(nextDist / currentDist);
+        this.camera.position.copy(this.controls.target).add(_zoomOffset);
+        if (Math.abs(nextDist - this.targetZoomDistance) < 0.02) {
+          this.targetZoomDistance = null;
+        }
+      } else {
+        this.targetZoomDistance = null;
+      }
     }
 
-    // 6. Ambient motes
-    this.ambientParticles.rotation.y = elapsed * 0.025;
+    // 6. Audio-reactive motes (blink and breathe with the beat)
+    const levels = this.callbacks.getAudioLevels?.();
+    const targetMix = levels?.active ? 1 : 0;
+    this.particlePlayingMix = THREE.MathUtils.damp(this.particlePlayingMix, targetMix, 6, dt);
+
+    const uniforms = this.particleMat.uniforms;
+    uniforms.uTime.value = elapsed;
+    uniforms.uBass.value = levels?.bass ?? 0;
+    uniforms.uMid.value = levels?.mid ?? 0;
+    uniforms.uHigh.value = levels?.high ?? 0;
+    uniforms.uPulse.value = levels?.pulse ?? 0;
+    uniforms.uPlaying.value = this.particlePlayingMix;
+
+    this.ambientParticles.rotation.y =
+      elapsed * 0.025 + (levels?.pulse ?? 0) * 0.015 * this.particlePlayingMix;
+    this.envController.update(elapsed);
 
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
@@ -980,6 +1131,7 @@ export class TurntableScene {
     window.removeEventListener('resize', this.handleResize);
 
     this.controls.dispose();
+    this.envController.dispose();
     this.disposables.forEach((d) => d.dispose());
     this.renderer.dispose();
     if (dom.parentElement === this.container) {

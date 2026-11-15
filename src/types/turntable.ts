@@ -1,5 +1,7 @@
 export type PlinthFinish = 'walnut' | 'ebony' | 'oak';
 
+export type SceneEnvironment = 'valley' | 'forest' | 'ocean' | 'space' | 'studio';
+
 export type CameraPreset = 'overview' | 'needle' | 'label' | 'top';
 
 export type RpmMode = 33 | 45;
@@ -23,6 +25,7 @@ export interface TurntableConfig {
   subtitle: string;
   signature: string;
   finish?: PlinthFinish;
+  environment?: SceneEnvironment;
   discs: VinylDisc[];
 }
 

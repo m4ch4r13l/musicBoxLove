@@ -76,17 +76,33 @@ const PRESET_DEFS: SynthPresetDef[] = [
   },
 ];
 
+export interface AudioReactiveLevels {
+  bass: number;
+  mid: number;
+  high: number;
+  pulse: number;
+  active: boolean;
+}
+
 export class VinylAudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private realAudioGain: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private mediaSource: MediaElementAudioSourceNode | null = null;
+  private freqData: Uint8Array<ArrayBuffer> | null = null;
+
   private warmthFilter: BiquadFilterNode | null = null;
   private reverbNode: ConvolverNode | null = null;
   private crackleSource: AudioBufferSourceNode | null = null;
   private crackleGain: GainNode | null = null;
   private synthTimer: number | null = null;
 
-  private realAudio: HTMLAudioElement;
-  private loadedAudioUrl = '';
+  private analyzedAudio: HTMLAudioElement;
+  private plainAudio: HTMLAudioElement;
+  private activeAudioEl: HTMLAudioElement;
+  private loadedUrlMap = new WeakMap<HTMLAudioElement, string>();
+
   private isPlaying = false;
   private volume = 0.72;
   private crackleEnabled = true;
@@ -95,29 +111,65 @@ export class VinylAudioEngine {
   private fallbackActive = false;
   private step = 0;
 
+  // Beat / onset detection state (zero-allocation per frame)
+  private avgBass = 0;
+  private smoothBass = 0;
+  private smoothMid = 0;
+  private smoothHigh = 0;
+  private beatPulse = 0;
+  private reactiveLevels: AudioReactiveLevels = {
+    bass: 0,
+    mid: 0,
+    high: 0,
+    pulse: 0,
+    active: false,
+  };
+
   private onStatusChange?: (status: AudioPlaybackStatus) => void;
   private progressTimer: number | null = null;
 
   constructor(onStatusChange?: (status: AudioPlaybackStatus) => void) {
     this.onStatusChange = onStatusChange;
-    this.realAudio = new Audio();
-    this.realAudio.preload = 'metadata';
+    this.analyzedAudio = this.createAudioElement();
+    this.plainAudio = this.createAudioElement();
+    this.activeAudioEl = this.plainAudio;
+  }
 
-    this.realAudio.addEventListener('ended', () => {
-      // Loop gently like a record or notify
-      this.realAudio.currentTime = 0;
+  private createAudioElement(): HTMLAudioElement {
+    const el = new Audio();
+    el.preload = 'metadata';
+
+    el.addEventListener('ended', () => {
+      if (el !== this.activeAudioEl) return;
+      el.currentTime = 0;
       if (this.isPlaying) {
-        this.realAudio.play().catch(() => {});
+        el.play().catch(() => {});
       }
     });
 
-    this.realAudio.addEventListener('timeupdate', () => {
-      this.emitStatus();
+    el.addEventListener('timeupdate', () => {
+      if (el === this.activeAudioEl) {
+        this.emitStatus();
+      }
     });
 
-    this.realAudio.addEventListener('loadedmetadata', () => {
-      this.emitStatus();
+    el.addEventListener('loadedmetadata', () => {
+      if (el === this.activeAudioEl) {
+        this.emitStatus();
+      }
     });
+
+    return el;
+  }
+
+  private canAnalyseUrl(url: string): boolean {
+    try {
+      if (url.startsWith('blob:') || url.startsWith('data:')) return true;
+      const resolved = new URL(url, window.location.href);
+      return resolved.origin === window.location.origin;
+    } catch {
+      return false;
+    }
   }
 
   private ensureContext(): AudioContext {
@@ -125,8 +177,16 @@ export class VinylAudioEngine {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
 
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 1024;
+      this.analyser.smoothingTimeConstant = 0.72;
+      this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
+
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = this.volume * 0.42;
+
+      this.realAudioGain = this.ctx.createGain();
+      this.realAudioGain.gain.value = this.volume;
 
       this.warmthFilter = this.ctx.createBiquadFilter();
       this.warmthFilter.type = 'lowpass';
@@ -145,15 +205,43 @@ export class VinylAudioEngine {
       this.warmthFilter.connect(this.reverbNode);
       this.reverbNode.connect(wetGain);
 
-      dryGain.connect(this.masterGain);
-      wetGain.connect(this.masterGain);
+      const synthBus = this.ctx.createGain();
+      synthBus.gain.value = 1.0;
+
+      dryGain.connect(synthBus);
+      wetGain.connect(synthBus);
+
+      synthBus.connect(this.masterGain);
+      synthBus.connect(this.analyser);
+
+      const silentSink = this.ctx.createGain();
+      silentSink.gain.value = 0;
+
       this.masterGain.connect(this.ctx.destination);
+      this.realAudioGain.connect(this.ctx.destination);
+      this.analyser.connect(silentSink);
+      silentSink.connect(this.ctx.destination);
     }
 
     if (this.ctx.state === 'suspended') {
       void this.ctx.resume();
     }
     return this.ctx;
+  }
+
+  private ensureMediaSource(): boolean {
+    if (this.mediaSource) return true;
+    const ctx = this.ensureContext();
+    if (!this.realAudioGain || !this.analyser) return false;
+    try {
+      this.mediaSource = ctx.createMediaElementSource(this.analyzedAudio);
+      this.mediaSource.connect(this.realAudioGain);
+      this.mediaSource.connect(this.analyser);
+      this.analyzedAudio.volume = 1;
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private createImpulseResponse(ctx: AudioContext, duration: number, decay: number): AudioBuffer {
@@ -369,14 +457,26 @@ export class VinylAudioEngine {
     const audioUrl = disc.audioUrl?.trim();
     if (audioUrl) {
       this.stopSynth();
-      if (this.loadedAudioUrl !== audioUrl) {
-        this.loadedAudioUrl = audioUrl;
-        this.realAudio.src = audioUrl;
-      }
-      this.realAudio.volume = this.volume;
-      this.realAudio.playbackRate = this.rpm === 45 ? 1.18 : 1.0;
 
-      this.realAudio
+      const useAnalyzed = this.canAnalyseUrl(audioUrl) && this.ensureMediaSource();
+      const targetEl = useAnalyzed ? this.analyzedAudio : this.plainAudio;
+      const otherEl = useAnalyzed ? this.plainAudio : this.analyzedAudio;
+      otherEl.pause();
+      this.activeAudioEl = targetEl;
+
+      if (this.loadedUrlMap.get(targetEl) !== audioUrl) {
+        this.loadedUrlMap.set(targetEl, audioUrl);
+        targetEl.src = audioUrl;
+      }
+
+      if (targetEl === this.plainAudio) {
+        targetEl.volume = this.volume;
+      } else {
+        targetEl.volume = 1;
+      }
+      targetEl.playbackRate = this.rpm === 45 ? 1.18 : 1.0;
+
+      targetEl
         .play()
         .then(() => {
           this.fallbackActive = false;
@@ -388,7 +488,8 @@ export class VinylAudioEngine {
           this.emitStatus();
         });
     } else {
-      this.realAudio.pause();
+      this.analyzedAudio.pause();
+      this.plainAudio.pause();
       this.startSynth(disc.synthPreset ?? 0);
       this.emitStatus();
     }
@@ -399,7 +500,8 @@ export class VinylAudioEngine {
       this.playNeedleLift();
     }
     this.isPlaying = false;
-    this.realAudio.pause();
+    this.analyzedAudio.pause();
+    this.plainAudio.pause();
     this.stopSynth();
     this.stopCrackle();
     this.emitStatus();
@@ -407,9 +509,14 @@ export class VinylAudioEngine {
 
   public setVolume(value: number): void {
     this.volume = Math.max(0, Math.min(1, value));
-    this.realAudio.volume = this.volume;
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(this.volume * 0.42, this.ctx.currentTime, 0.04);
+    this.plainAudio.volume = this.volume;
+    if (this.ctx) {
+      if (this.masterGain) {
+        this.masterGain.gain.setTargetAtTime(this.volume * 0.42, this.ctx.currentTime, 0.04);
+      }
+      if (this.realAudioGain) {
+        this.realAudioGain.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.04);
+      }
     }
   }
 
@@ -422,7 +529,9 @@ export class VinylAudioEngine {
 
   public setRpm(rpm: RpmMode): void {
     this.rpm = rpm;
-    this.realAudio.playbackRate = rpm === 45 ? 1.18 : 1.0;
+    const rate = rpm === 45 ? 1.18 : 1.0;
+    this.analyzedAudio.playbackRate = rate;
+    this.plainAudio.playbackRate = rate;
     if (this.isPlaying && this.currentDisc) {
       if (!this.currentDisc.audioUrl?.trim() || this.fallbackActive) {
         this.startSynth(this.currentDisc.synthPreset ?? 0);
@@ -431,19 +540,100 @@ export class VinylAudioEngine {
   }
 
   public seekTo(seconds: number): void {
-    if (Number.isFinite(seconds) && this.realAudio.duration > 0) {
-      this.realAudio.currentTime = Math.max(0, Math.min(this.realAudio.duration, seconds));
+    if (Number.isFinite(seconds) && this.activeAudioEl.duration > 0) {
+      this.activeAudioEl.currentTime = Math.max(
+        0,
+        Math.min(this.activeAudioEl.duration, seconds)
+      );
       this.emitStatus();
     }
+  }
+
+  public sampleReactiveLevels(): AudioReactiveLevels {
+    if (!this.isPlaying) {
+      this.avgBass *= 0.9;
+      this.smoothBass *= 0.86;
+      this.smoothMid *= 0.86;
+      this.smoothHigh *= 0.86;
+      this.beatPulse *= 0.82;
+      this.reactiveLevels.bass = this.smoothBass;
+      this.reactiveLevels.mid = this.smoothMid;
+      this.reactiveLevels.high = this.smoothHigh;
+      this.reactiveLevels.pulse = this.beatPulse;
+      this.reactiveLevels.active = false;
+      return this.reactiveLevels;
+    }
+
+    let rawBass = 0;
+    let rawMid = 0;
+    let rawHigh = 0;
+
+    if (this.analyser && this.freqData) {
+      this.analyser.getByteFrequencyData(this.freqData);
+      const data = this.freqData;
+
+      // 44.1kHz / 1024 ≈ 43 Hz per bin
+      let sum = 0;
+      for (let i = 1; i <= 5; i++) sum += data[i];
+      rawBass = sum / (5 * 255);
+
+      sum = 0;
+      for (let i = 6; i <= 34; i++) sum += data[i];
+      rawMid = sum / (29 * 255);
+
+      sum = 0;
+      for (let i = 35; i <= 120; i++) sum += data[i];
+      rawHigh = sum / (86 * 255);
+    }
+
+    // Fallback rhythmic pulse for external non-CORS MP3s that bypass WebAudio
+    const usingPlainExternal =
+      Boolean(this.currentDisc?.audioUrl?.trim()) &&
+      !this.fallbackActive &&
+      this.activeAudioEl === this.plainAudio;
+
+    if (usingPlainExternal && rawBass + rawMid + rawHigh < 0.015) {
+      const t = this.plainAudio.currentTime || performance.now() * 0.001;
+      const beatPhase = (t * 1.9) % 1; // ~114 BPM gentle pulse
+      const kick = Math.pow(Math.max(0, 1 - beatPhase * 2.8), 2);
+      const wave = 0.5 + 0.5 * Math.sin(t * 5.2);
+      rawBass = 0.25 + kick * 0.65;
+      rawMid = 0.28 + wave * 0.4;
+      rawHigh = 0.2 + Math.pow(Math.max(0, Math.sin(t * 11.4)), 2) * 0.45;
+    }
+
+    // Adaptive baseline + sharp transient detection so loud tracks still blink cleanly on beats
+    this.avgBass = this.avgBass * 0.91 + rawBass * 0.09;
+    const onset = Math.max(0, (rawBass - this.avgBass * 1.03) * 4.5);
+    const highOnset = Math.max(0, rawHigh - this.smoothHigh * 1.15) * 2.4;
+    const targetPulse = Math.min(1, onset + highOnset * 0.45);
+
+    if (targetPulse > this.beatPulse) {
+      this.beatPulse = this.beatPulse * 0.35 + targetPulse * 0.65;
+    } else {
+      this.beatPulse *= 0.85;
+    }
+
+    this.smoothBass = this.smoothBass * 0.62 + Math.min(1, rawBass * 1.35) * 0.38;
+    this.smoothMid = this.smoothMid * 0.65 + Math.min(1, rawMid * 1.55) * 0.35;
+    this.smoothHigh = this.smoothHigh * 0.6 + Math.min(1, rawHigh * 1.85) * 0.4;
+
+    this.reactiveLevels.bass = this.smoothBass;
+    this.reactiveLevels.mid = this.smoothMid;
+    this.reactiveLevels.high = this.smoothHigh;
+    this.reactiveLevels.pulse = this.beatPulse;
+    this.reactiveLevels.active = true;
+    return this.reactiveLevels;
   }
 
   private emitStatus(): void {
     if (!this.onStatusChange) return;
     const usingMp3 = Boolean(this.currentDisc?.audioUrl?.trim()) && !this.fallbackActive;
+    const el = this.activeAudioEl;
     this.onStatusChange({
       sourceType: usingMp3 ? 'mp3' : 'synth',
-      currentTime: usingMp3 ? this.realAudio.currentTime || 0 : 0,
-      duration: usingMp3 && Number.isFinite(this.realAudio.duration) ? this.realAudio.duration : 0,
+      currentTime: usingMp3 ? el.currentTime || 0 : 0,
+      duration: usingMp3 && Number.isFinite(el.duration) ? el.duration : 0,
       fallbackActive: this.fallbackActive,
     });
   }
@@ -453,7 +643,8 @@ export class VinylAudioEngine {
     if (this.progressTimer !== null) {
       window.clearInterval(this.progressTimer);
     }
-    this.realAudio.src = '';
+    this.analyzedAudio.src = '';
+    this.plainAudio.src = '';
     if (this.ctx) {
       void this.ctx.close();
       this.ctx = null;

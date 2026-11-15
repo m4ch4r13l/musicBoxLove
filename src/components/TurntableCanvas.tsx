@@ -1,40 +1,71 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Disc3 } from 'lucide-react';
+import type { AudioReactiveLevels } from '../audio/vinylAudioEngine';
 import { TurntableScene } from '../three/TurntableScene';
-import type { CameraPreset, PlinthFinish, RpmMode, VinylDisc } from '../types/turntable';
+import type {
+  CameraPreset,
+  PlinthFinish,
+  RpmMode,
+  SceneEnvironment,
+  VinylDisc,
+} from '../types/turntable';
+
+export interface TurntableCanvasHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+}
 
 interface TurntableCanvasProps {
   currentDisc: VinylDisc;
   isPlaying: boolean;
   rpm: RpmMode;
   finish: PlinthFinish;
+  environment: SceneEnvironment;
   dustCoverOpen: boolean;
   cameraPreset: CameraPreset;
   presetRequestTick: number;
   playbackProgress: number;
+  getAudioLevels?: () => AudioReactiveLevels;
   onTogglePlay: () => void;
   onToggleRpm: () => void;
 }
 
-export function TurntableCanvas({
-  currentDisc,
-  isPlaying,
-  rpm,
-  finish,
-  dustCoverOpen,
-  cameraPreset,
-  presetRequestTick,
-  playbackProgress,
-  onTogglePlay,
-  onToggleRpm,
-}: TurntableCanvasProps) {
-  const mountRef = useRef<HTMLDivElement | null>(null);
-  const sceneRef = useRef<TurntableScene | null>(null);
+export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvasProps>(
+  function TurntableCanvas(
+    {
+      currentDisc,
+      isPlaying,
+      rpm,
+      finish,
+      environment,
+      dustCoverOpen,
+      cameraPreset,
+      presetRequestTick,
+      playbackProgress,
+      getAudioLevels,
+      onTogglePlay,
+      onToggleRpm,
+    },
+    ref
+  ) {
+    const mountRef = useRef<HTMLDivElement | null>(null);
+    const sceneRef = useRef<TurntableScene | null>(null);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        zoomIn: () => sceneRef.current?.zoomBy(0.74),
+        zoomOut: () => sceneRef.current?.zoomBy(1.36),
+      }),
+      []
+    );
 
   const onTogglePlayRef = useRef(onTogglePlay);
   const onToggleRpmRef = useRef(onToggleRpm);
+  const getAudioLevelsRef = useRef(getAudioLevels);
   onTogglePlayRef.current = onTogglePlay;
   onToggleRpmRef.current = onToggleRpm;
+  getAudioLevelsRef.current = getAudioLevels;
 
   const [webglError, setWebglError] = useState(false);
 
@@ -46,6 +77,14 @@ export function TurntableCanvas({
       const controller = new TurntableScene(container, {
         onTogglePlay: () => onTogglePlayRef.current(),
         onToggleRpm: () => onToggleRpmRef.current(),
+        getAudioLevels: () =>
+          getAudioLevelsRef.current?.() ?? {
+            bass: 0,
+            mid: 0,
+            high: 0,
+            pulse: 0,
+            active: false,
+          },
         onContextLost: () => setWebglError(true),
         onContextRestored: () => setWebglError(false),
       });
@@ -74,6 +113,10 @@ export function TurntableCanvas({
   useEffect(() => {
     sceneRef.current?.setFinish(finish);
   }, [finish]);
+
+  useEffect(() => {
+    sceneRef.current?.setEnvironment(environment);
+  }, [environment]);
 
   useEffect(() => {
     sceneRef.current?.setDustCoverOpen(dustCoverOpen);
@@ -113,4 +156,4 @@ export function TurntableCanvas({
       )}
     </div>
   );
-}
+});

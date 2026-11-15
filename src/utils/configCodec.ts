@@ -1,4 +1,9 @@
-import type { PlinthFinish, TurntableConfig, VinylDisc } from '../types/turntable';
+import type {
+  PlinthFinish,
+  SceneEnvironment,
+  TurntableConfig,
+  VinylDisc,
+} from '../types/turntable';
 
 const DRAFT_STORAGE_KEY = 'nuestros_discos_draft_v3';
 
@@ -25,12 +30,26 @@ export const PLINTH_FINISHES: { id: PlinthFinish; label: string; swatch: string 
   { id: 'oak', label: 'Roble Miel', swatch: '#8a613a' },
 ];
 
+export const SCENE_ENVIRONMENTS: {
+  id: SceneEnvironment;
+  label: string;
+  desc: string;
+  swatch: string;
+}[] = [
+  { id: 'valley', label: 'Valle con pasto', desc: 'Pradera y colinas al atardecer', swatch: '#4c7c3a' },
+  { id: 'forest', label: 'Bosque', desc: 'Claro entre pinos y musgo', swatch: '#234232' },
+  { id: 'ocean', label: 'El Mar', desc: 'Muelle sobre olas doradas', swatch: '#28527a' },
+  { id: 'space', label: 'El Espacio', desc: 'Estrellas y planeta con anillos', swatch: '#1c1538' },
+  { id: 'studio', label: 'Estudio', desc: 'Mesa nocturna clásica', swatch: '#1a1411' },
+];
+
 export const DEFAULT_CONFIG: TurntableConfig = {
   eyebrow: 'Nuestra Banda Sonora · Vol. I',
   title: 'Canciones que me recuerdan a ti',
   subtitle: 'Baja la aguja para escuchar y abre la funda para leer la dedicatoria.',
   signature: 'Siempre tuyo',
   finish: 'walnut',
+  environment: 'valley',
   discs: [
     {
       id: 'disc-impacto',
@@ -96,12 +115,22 @@ export function normalizeConfig(raw: Partial<TurntableConfig> | null | undefined
       ? raw.finish
       : 'walnut';
 
+  const environment: SceneEnvironment =
+    raw.environment === 'valley' ||
+    raw.environment === 'forest' ||
+    raw.environment === 'ocean' ||
+    raw.environment === 'space' ||
+    raw.environment === 'studio'
+      ? raw.environment
+      : 'valley';
+
   return {
     eyebrow: typeof raw.eyebrow === 'string' ? raw.eyebrow : base.eyebrow,
     title: typeof raw.title === 'string' ? raw.title : base.title,
     subtitle: typeof raw.subtitle === 'string' ? raw.subtitle : base.subtitle,
     signature: typeof raw.signature === 'string' ? raw.signature : base.signature,
     finish,
+    environment,
     discs,
   };
 }

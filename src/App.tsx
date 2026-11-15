@@ -4,7 +4,7 @@ import { BottomDock } from './components/BottomDock';
 import { DedicationModal } from './components/DedicationModal';
 import { EditorDrawer } from './components/EditorDrawer';
 import { TopBar } from './components/TopBar';
-import { TurntableCanvas } from './components/TurntableCanvas';
+import { TurntableCanvas, type TurntableCanvasHandle } from './components/TurntableCanvas';
 import type {
   AudioPlaybackStatus,
   CameraPreset,
@@ -53,6 +53,7 @@ export default function App() {
   });
 
   const audioEngineRef = useRef<VinylAudioEngine | null>(null);
+  const canvasRef = useRef<TurntableCanvasHandle | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -247,14 +248,25 @@ export default function App() {
     <main className="relative w-full h-full overflow-hidden select-none">
       {/* Full-viewport 3D Turntable */}
       <TurntableCanvas
+        ref={canvasRef}
         currentDisc={currentDisc}
         isPlaying={isPlaying}
         rpm={rpm}
         finish={config.finish ?? 'walnut'}
+        environment={config.environment ?? 'valley'}
         dustCoverOpen={dustCoverOpen}
         cameraPreset={cameraPreset}
         presetRequestTick={presetRequestTick}
         playbackProgress={playbackProgress}
+        getAudioLevels={() =>
+          audioEngineRef.current?.sampleReactiveLevels() ?? {
+            bass: 0,
+            mid: 0,
+            high: 0,
+            pulse: 0,
+            active: false,
+          }
+        }
         onTogglePlay={handleTogglePlay}
         onToggleRpm={handleToggleRpm}
       />
@@ -310,6 +322,8 @@ export default function App() {
         onToggleCrackle={handleToggleCrackle}
         onChangeVolume={handleChangeVolume}
         onSelectCameraPreset={handleSelectCameraPreset}
+        onZoomIn={() => canvasRef.current?.zoomIn()}
+        onZoomOut={() => canvasRef.current?.zoomOut()}
         onSeek={(sec) => audioEngineRef.current?.seekTo(sec)}
       />
 
