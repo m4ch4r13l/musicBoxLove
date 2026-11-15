@@ -1,6 +1,6 @@
 import type { PlinthFinish, TurntableConfig, VinylDisc } from '../types/turntable';
 
-const DRAFT_STORAGE_KEY = 'nuestros_discos_draft_v1';
+const DRAFT_STORAGE_KEY = 'nuestros_discos_draft_v3';
 
 export const SYNTH_PRESETS = [
   { id: 0, name: 'Noche de Lluvia (Lo-Fi Rhodes)' },
@@ -28,45 +28,21 @@ export const PLINTH_FINISHES: { id: PlinthFinish; label: string; swatch: string 
 export const DEFAULT_CONFIG: TurntableConfig = {
   eyebrow: 'Nuestra Banda Sonora · Vol. I',
   title: 'Canciones que me recuerdan a ti',
-  subtitle: 'Elige un vinilo, baja la aguja y descubre lo que escribí detrás de cada funda.',
+  subtitle: 'Baja la aguja para escuchar y abre la funda para leer la dedicatoria.',
   signature: 'Siempre tuyo',
   finish: 'walnut',
   discs: [
     {
-      id: 'disc-1',
-      title: 'La primera vez que te vi',
-      artist: 'Melodía Nocturna',
-      date: 'El comienzo de todo',
+      id: 'disc-impacto',
+      title: 'Impacto',
+      artist: 'Edición de Prueba',
+      date: 'Nuestro Vinilo',
       vinylColor: '#141414',
       labelColor: '#d97742',
-      coverUrl: '',
-      audioUrl: '',
+      coverUrl: './assets/aistudio/WhatsApp_Image_2026-11-07_at_2.39.05_PM_ec320f2a.jpeg',
+      audioUrl: './assets/aistudio/Impacto_67dc20b1.mp3',
       synthPreset: 0,
-      note: 'Todavía recuerdo exactamente cómo iba el tiempo ese día. No sabía que una coincidencia tan simple se iba a convertir en mi lugar favorito del mundo.\n\nDale play y deja que gire un rato.',
-    },
-    {
-      id: 'disc-2',
-      title: 'Nuestros viajes sin prisa',
-      artist: 'Acordes de Tarde',
-      date: 'Kilómetros juntos',
-      vinylColor: '#5e1924',
-      labelColor: '#f0c987',
-      coverUrl: '',
-      audioUrl: '',
-      synthPreset: 1,
-      note: 'No importa si vamos lejos o solo a dar la vuelta por un café: contigo cualquier trayecto suena bien. Gracias por ser mi mejor compañía.',
-    },
-    {
-      id: 'disc-3',
-      title: 'Lo que aún nos falta vivir',
-      artist: 'Caja de Música',
-      date: 'Para el futuro',
-      vinylColor: '#19384a',
-      labelColor: '#9ad1d4',
-      coverUrl: '',
-      audioUrl: '',
-      synthPreset: 2,
-      note: 'Este disco todavía tiene espacio en blanco para todas las canciones, risas y aventuras que nos faltan por estrenar.\n\nTe quiero muchísimo.',
+      note: 'Te diría que quiero\na alguien como tú.\nPero no, yo te quiero a ti',
     },
   ],
 };
@@ -81,7 +57,12 @@ export function sanitizeColor(colorStr: unknown, fallback = '#e89f65'): string {
 export function sanitizeHttpUrl(urlStr: unknown): string {
   if (typeof urlStr !== 'string') return '';
   const trimmed = urlStr.trim();
-  if (/^https?:\/\//i.test(trimmed) || /^blob:/i.test(trimmed)) {
+  if (
+    /^https?:\/\//i.test(trimmed) ||
+    /^blob:/i.test(trimmed) ||
+    /^\.\//.test(trimmed) ||
+    /^\/[^/]/.test(trimmed)
+  ) {
     return trimmed;
   }
   return '';

@@ -11,6 +11,7 @@ interface TurntableCanvasProps {
   dustCoverOpen: boolean;
   cameraPreset: CameraPreset;
   presetRequestTick: number;
+  playbackProgress: number;
   onTogglePlay: () => void;
   onToggleRpm: () => void;
 }
@@ -23,6 +24,7 @@ export function TurntableCanvas({
   dustCoverOpen,
   cameraPreset,
   presetRequestTick,
+  playbackProgress,
   onTogglePlay,
   onToggleRpm,
 }: TurntableCanvasProps) {
@@ -76,6 +78,10 @@ export function TurntableCanvas({
   useEffect(() => {
     sceneRef.current?.setDustCoverOpen(dustCoverOpen);
   }, [dustCoverOpen]);
+
+  useEffect(() => {
+    sceneRef.current?.setPlaybackProgress(playbackProgress);
+  }, [playbackProgress]);
 
   useEffect(() => {
     if (presetRequestTick > 0) {

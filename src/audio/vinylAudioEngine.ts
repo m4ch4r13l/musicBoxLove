@@ -86,6 +86,7 @@ export class VinylAudioEngine {
   private synthTimer: number | null = null;
 
   private realAudio: HTMLAudioElement;
+  private loadedAudioUrl = '';
   private isPlaying = false;
   private volume = 0.72;
   private crackleEnabled = true;
@@ -100,7 +101,6 @@ export class VinylAudioEngine {
   constructor(onStatusChange?: (status: AudioPlaybackStatus) => void) {
     this.onStatusChange = onStatusChange;
     this.realAudio = new Audio();
-    this.realAudio.crossOrigin = 'anonymous';
     this.realAudio.preload = 'metadata';
 
     this.realAudio.addEventListener('ended', () => {
@@ -369,7 +369,8 @@ export class VinylAudioEngine {
     const audioUrl = disc.audioUrl?.trim();
     if (audioUrl) {
       this.stopSynth();
-      if (this.realAudio.src !== audioUrl) {
+      if (this.loadedAudioUrl !== audioUrl) {
+        this.loadedAudioUrl = audioUrl;
         this.realAudio.src = audioUrl;
       }
       this.realAudio.volume = this.volume;

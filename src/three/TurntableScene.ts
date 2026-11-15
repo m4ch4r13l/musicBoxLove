@@ -72,6 +72,8 @@ export class TurntableScene {
   private platterSpeed = 0;
   private targetArmYaw = 0.02;
   private targetArmPitch = -0.025;
+  private externalProgress = -1;
+  private synthProgress = 0;
   private discLiftOffset = 0;
   private discLiftPhase: 'idle' | 'lifting' | 'dropping' = 'idle';
   private pendingDisc: VinylDisc | null = null;
@@ -742,6 +744,10 @@ export class TurntableScene {
     const isDifferent = !this.currentDisc || this.currentDisc.id !== disc.id;
     this.currentDisc = disc;
 
+    if (isDifferent) {
+      this.synthProgress = 0;
+    }
+
     if (animateSwap && isDifferent && this.discLiftPhase === 'idle') {
       this.pendingDisc = disc;
       this.discLiftPhase = 'lifting';
@@ -755,10 +761,19 @@ export class TurntableScene {
     this.labelController.update(disc, this.rpm);
   }
 
+  public setPlaybackProgress(progress: number): void {
+    if (progress >= 0 && Number.isFinite(progress)) {
+      this.externalProgress = THREE.MathUtils.clamp(progress, 0, 1);
+    } else {
+      this.externalProgress = -1;
+    }
+  }
+
   public setPlaying(playing: boolean): void {
     this.isPlaying = playing;
     if (playing) {
-      this.targetArmYaw = -0.56;
+      const p = this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
+      this.targetArmYaw = THREE.MathUtils.lerp(-0.46, -0.82, p);
       this.targetArmPitch = 0.008;
       this.ledMat.emissiveIntensity = 2.6;
       this.strobeLightMat.emissiveIntensity = 2.4;
@@ -843,6 +858,15 @@ export class TurntableScene {
     this.discGroup.position.y = this.discLiftOffset;
 
     // 3. Tonearm, cue lever & plinth tactile switches
+    if (this.isPlaying) {
+      if (this.externalProgress < 0) {
+        this.synthProgress = (this.synthProgress + dt / 90) % 1;
+      }
+      const trackProgress =
+        this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
+      this.targetArmYaw = THREE.MathUtils.lerp(-0.46, -0.82, trackProgress);
+    }
+
     this.tonearmArm.rotation.y = THREE.MathUtils.damp(
       this.tonearmArm.rotation.y,
       this.targetArmYaw,
@@ -856,7 +880,7 @@ export class TurntableScene {
       dt
     );
     if (this.isPlaying && this.platterSpeed > 1.6) {
-      this.tonearmArm.rotation.y += Math.sin(elapsed * 2.6) * 0.0005;
+      this.tonearmArm.rotation.y += Math.sin(elapsed * 2.6) * 0.0004;
     }
 
     const targetCueZ = this.isPlaying ? 0.08 : 0.52;

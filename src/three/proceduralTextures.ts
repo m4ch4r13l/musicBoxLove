@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { PlinthFinish, RpmMode, VinylDisc } from '../types/turntable';
-import { sanitizeColor } from '../utils/configCodec';
+import { sanitizeColor, sanitizeHttpUrl } from '../utils/configCodec';
 
 const FINISH_PALETTES: Record<
   PlinthFinish,
@@ -250,6 +250,8 @@ export class LabelTextureController {
   public readonly canvas: HTMLCanvasElement;
   public readonly texture: THREE.CanvasTexture;
   private ctx: CanvasRenderingContext2D | null;
+  private imageCache = new Map<string, HTMLImageElement>();
+  private latestUpdateToken = 0;
 
   constructor(maxAnisotropy: number) {
     this.canvas = document.createElement('canvas');
@@ -262,6 +264,31 @@ export class LabelTextureController {
   }
 
   public update(disc: VinylDisc, rpm: RpmMode): void {
+    const token = ++this.latestUpdateToken;
+    const safeCover = sanitizeHttpUrl(disc.coverUrl);
+
+    this.drawLabel(disc, rpm, safeCover ? this.imageCache.get(safeCover) : undefined);
+
+    if (safeCover && !this.imageCache.has(safeCover)) {
+      const img = new Image();
+      if (/^https?:\/\//i.test(safeCover)) {
+        img.crossOrigin = 'anonymous';
+      }
+      img.onload = () => {
+        this.imageCache.set(safeCover, img);
+        if (token === this.latestUpdateToken) {
+          this.drawLabel(disc, rpm, img);
+        }
+      };
+      img.src = safeCover;
+    }
+  }
+
+  private drawLabel(
+    disc: VinylDisc,
+    rpm: RpmMode,
+    coverImg?: HTMLImageElement
+  ): void {
     const ctx = this.ctx;
     if (!ctx) return;
 
@@ -272,48 +299,72 @@ export class LabelTextureController {
     ctx.fillStyle = labelColor;
     ctx.fillRect(0, 0, 512, 512);
 
-    // Subtle paper grain rings
-    ctx.strokeStyle = 'rgba(28, 19, 13, 0.14)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(256, 256, 232, 0, Math.PI * 2);
-    ctx.stroke();
+    if (coverImg && coverImg.complete && coverImg.naturalWidth > 0) {
+      // Draw circular cropped cover artwork
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(256, 256, 238, 0, Math.PI * 2);
+      ctx.clip();
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(256, 256, 214, 0, Math.PI * 2);
-    ctx.stroke();
+      const scale = Math.max(512 / coverImg.naturalWidth, 512 / coverImg.naturalHeight);
+      const drawW = coverImg.naturalWidth * scale;
+      const drawH = coverImg.naturalHeight * scale;
+      ctx.drawImage(coverImg, (512 - drawW) / 2, (512 - drawH) / 2, drawW, drawH);
 
-    ctx.strokeStyle = 'rgba(28, 19, 13, 0.28)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(256, 256, 118, 0, Math.PI * 2);
-    ctx.stroke();
+      // Subtle dark outer vignette for crisp ring contrast
+      const grad = ctx.createRadialGradient(256, 256, 120, 256, 256, 244);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.35)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 512, 512);
+      ctx.restore();
 
-    // Title
-    ctx.fillStyle = '#1b120c';
-    ctx.font = '600 25px Georgia, serif';
-    ctx.textAlign = 'center';
-    const shortTitle = String(disc.title || 'Nuestro Disco').slice(0, 24);
-    ctx.fillText(shortTitle, 256, 156);
+      // Subtle outer framing ring
+      ctx.strokeStyle = 'rgba(255, 238, 215, 0.55)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(256, 256, 236, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // Decorative paper rings & typography when no cover artwork is set
+      ctx.strokeStyle = 'rgba(28, 19, 13, 0.14)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(256, 256, 232, 0, Math.PI * 2);
+      ctx.stroke();
 
-    // Artist
-    ctx.font = '500 17px sans-serif';
-    ctx.fillStyle = 'rgba(27, 18, 12, 0.78)';
-    const shortArtist = String(disc.artist || 'Edición Especial').slice(0, 26);
-    ctx.fillText(shortArtist, 256, 186);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(256, 256, 214, 0, Math.PI * 2);
+      ctx.stroke();
 
-    // Side & RPM badge
-    ctx.font = '600 14px sans-serif';
-    ctx.fillStyle = 'rgba(27, 18, 12, 0.72)';
-    ctx.fillText(`LADO A  ·  ${rpm} RPM`, 256, 336);
+      ctx.strokeStyle = 'rgba(28, 19, 13, 0.28)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(256, 256, 118, 0, Math.PI * 2);
+      ctx.stroke();
 
-    // Date
-    ctx.font = 'italic 18px Georgia, serif';
-    ctx.fillStyle = 'rgba(27, 18, 12, 0.85)';
-    const shortDate = String(disc.date || 'Para Ti').slice(0, 26);
-    ctx.fillText(shortDate, 256, 368);
+      ctx.fillStyle = '#1b120c';
+      ctx.font = '600 25px Georgia, serif';
+      ctx.textAlign = 'center';
+      const shortTitle = String(disc.title || 'Nuestro Disco').slice(0, 24);
+      ctx.fillText(shortTitle, 256, 156);
+
+      ctx.font = '500 17px sans-serif';
+      ctx.fillStyle = 'rgba(27, 18, 12, 0.78)';
+      const shortArtist = String(disc.artist || 'Edición Especial').slice(0, 26);
+      ctx.fillText(shortArtist, 256, 186);
+
+      ctx.font = '600 14px sans-serif';
+      ctx.fillStyle = 'rgba(27, 18, 12, 0.72)';
+      ctx.fillText(`LADO A  ·  ${rpm} RPM`, 256, 336);
+
+      ctx.font = 'italic 18px Georgia, serif';
+      ctx.fillStyle = 'rgba(27, 18, 12, 0.85)';
+      const shortDate = String(disc.date || 'Para Ti').slice(0, 26);
+      ctx.fillText(shortDate, 256, 368);
+    }
 
     // Spindle cutout ring
     ctx.fillStyle = '#100c0a';
@@ -325,6 +376,7 @@ export class LabelTextureController {
   }
 
   public dispose(): void {
+    this.imageCache.clear();
     this.texture.dispose();
   }
 }

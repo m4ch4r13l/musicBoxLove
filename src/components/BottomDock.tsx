@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   Camera,
   ChevronDown,
@@ -17,7 +18,7 @@ import type {
   RpmMode,
   VinylDisc,
 } from '../types/turntable';
-import { sanitizeColor } from '../utils/configCodec';
+import { sanitizeColor, sanitizeHttpUrl } from '../utils/configCodec';
 
 interface BottomDockProps {
   discs: VinylDisc[];
@@ -83,6 +84,12 @@ export function BottomDock({
   const currentDisc = discs[currentIndex] ?? discs[0];
   const labelColor = sanitizeColor(currentDisc?.labelColor, '#e89f65');
   const vinylColor = sanitizeColor(currentDisc?.vinylColor, '#141414');
+  const safeCoverUrl = sanitizeHttpUrl(currentDisc?.coverUrl);
+  const [miniImgError, setMiniImgError] = useState(false);
+
+  useEffect(() => {
+    setMiniImgError(false);
+  }, [safeCoverUrl]);
 
   return (
     <div
@@ -145,7 +152,7 @@ export function BottomDock({
         <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div
-              className={`w-11 h-11 rounded-full border border-white/15 grid place-items-center shrink-0 ${
+              className={`relative w-11 h-11 rounded-full border border-white/15 grid place-items-center shrink-0 overflow-hidden ${
                 isPlaying
                   ? rpm === 45
                     ? 'animate-vinyl-spin-45'
@@ -156,10 +163,23 @@ export function BottomDock({
                 background: `radial-gradient(circle, ${vinylColor} 45%, #0c0a09 100%)`,
               }}
             >
-              <div
-                className="w-4 h-4 rounded-full border-2 border-[#111]"
-                style={{ backgroundColor: labelColor }}
-              />
+              {safeCoverUrl && !miniImgError ? (
+                <>
+                  <img
+                    src={safeCoverUrl}
+                    alt={currentDisc?.title || 'Portada del disco'}
+                    referrerPolicy="no-referrer"
+                    onError={() => setMiniImgError(true)}
+                    className="w-6 h-6 rounded-full object-cover"
+                  />
+                  <div className="absolute w-2 h-2 rounded-full bg-[#111] border border-white/30" />
+                </>
+              ) : (
+                <div
+                  className="w-4 h-4 rounded-full border-2 border-[#111]"
+                  style={{ backgroundColor: labelColor }}
+                />
+              )}
             </div>
 
             <div className="min-w-0 flex-1">

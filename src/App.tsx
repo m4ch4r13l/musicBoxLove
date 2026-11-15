@@ -238,6 +238,10 @@ export default function App() {
   }, [showToast]);
 
   const showEditorButton = !isGiftMode && !isPreviewingGift;
+  const playbackProgress =
+    audioStatus.sourceType === 'mp3' && audioStatus.duration > 0
+      ? audioStatus.currentTime / audioStatus.duration
+      : -1;
 
   return (
     <main className="relative w-full h-full overflow-hidden select-none">
@@ -250,6 +254,7 @@ export default function App() {
         dustCoverOpen={dustCoverOpen}
         cameraPreset={cameraPreset}
         presetRequestTick={presetRequestTick}
+        playbackProgress={playbackProgress}
         onTogglePlay={handleTogglePlay}
         onToggleRpm={handleToggleRpm}
       />

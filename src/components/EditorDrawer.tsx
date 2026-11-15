@@ -466,8 +466,8 @@ export function EditorDrawer({
                         </label>
                       </div>
                       <input
-                        type="url"
-                        placeholder="https://.../cancion.mp3"
+                        type="text"
+                        placeholder="https://.../cancion.mp3 o ./assets/..."
                         value={disc.audioUrl.startsWith('blob:') ? '' : disc.audioUrl}
                         onChange={(e) => updateDisc(idx, 'audioUrl', e.target.value)}
                         className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
@@ -485,7 +485,7 @@ export function EditorDrawer({
                         URL de foto de portada (opcional)
                       </label>
                       <input
-                        type="url"
+                        type="text"
                         placeholder="https://.../foto.jpg"
                         value={disc.coverUrl}
                         onChange={(e) => updateDisc(idx, 'coverUrl', e.target.value)}
