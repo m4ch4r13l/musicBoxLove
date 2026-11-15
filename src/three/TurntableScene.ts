@@ -116,13 +116,19 @@ export class TurntableScene {
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
+    const aspect = width / Math.max(height, 1);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x100c0a);
-    this.scene.fog = new THREE.FogExp2(0x100c0a, 0.042);
+    this.scene.fog = new THREE.FogExp2(0x100c0a, 0.022);
 
-    this.camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 80);
-    this.camera.position.set(...CAMERA_PRESETS.overview.pos);
+    this.camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 120);
+    const portraitScale = this.getPortraitDistanceScale(aspect);
+    this.camera.position.set(
+      CAMERA_PRESETS.overview.pos[0] * portraitScale,
+      CAMERA_PRESETS.overview.pos[1] * portraitScale,
+      CAMERA_PRESETS.overview.pos[2] * portraitScale
+    );
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: !this.isSoftwareGl,
@@ -153,8 +159,8 @@ export class TurntableScene {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = !this.isSoftwareGl;
     this.controls.dampingFactor = 0.06;
-    this.controls.minDistance = 3.2;
-    this.controls.maxDistance = 11.5;
+    this.controls.minDistance = 2.8;
+    this.controls.maxDistance = 22;
     this.controls.maxPolarAngle = Math.PI * 0.46;
     this.controls.minPolarAngle = 0.08;
     this.controls.target.set(...CAMERA_PRESETS.overview.target);
@@ -183,7 +189,7 @@ export class TurntableScene {
     // Tabletop & Contact Shadow Grounding
     const tabletopTex = createTabletopTexture(maxAnisotropy);
     this.disposables.push(tabletopTex);
-    const tabletopGeo = new THREE.CircleGeometry(18, 64);
+    const tabletopGeo = new THREE.CircleGeometry(28, 64);
     const tabletopMat = new THREE.MeshStandardMaterial({
       map: tabletopTex,
       roughness: 0.85,
@@ -731,10 +737,14 @@ export class TurntableScene {
     this.callbacks.onContextRestored?.();
   };
 
+  private getPortraitDistanceScale(aspect: number): number {
+    return aspect < 1 ? Math.min(2.15, 1.05 / Math.max(aspect, 0.45)) : 1;
+  }
+
   private handleResize = (): void => {
     if (this.disposed) return;
     const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
+    const h = Math.max(this.container.clientHeight || window.innerHeight, 1);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
@@ -919,7 +929,15 @@ export class TurntableScene {
     // 5. Scripted camera preset damping (stops on arrival or user drag)
     if (this.activeCameraTransition) {
       const preset = CAMERA_PRESETS[this.activePreset];
-      _targetCamPos.set(...preset.pos);
+      const scale =
+        this.activePreset === 'overview' || this.activePreset === 'top'
+          ? this.getPortraitDistanceScale(this.camera.aspect)
+          : 1;
+      _targetCamPos.set(
+        preset.pos[0] * scale,
+        preset.pos[1] * scale,
+        preset.pos[2] * scale
+      );
       _targetLookAt.set(...preset.target);
 
       this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _targetCamPos.x, 5.5, dt);
