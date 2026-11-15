@@ -1,0 +1,6 @@
+{
+  "name": "Nuestros Discos — Tocadiscos 3D Interactivo",
+  "description": "Un tocadiscos 3D interactivo para regalar canciones, recuerdos y dedicatorias escritas en la funda de cada vinilo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

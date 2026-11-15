@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+:root {
+  --bg-dark: #100c0a;
+  --surface-panel: rgba(22, 17, 14, 0.92);
+  --surface-elevated: rgba(34, 26, 21, 0.96);
+  --border-subtle: rgba(255, 224, 189, 0.14);
+  --accent: #e89f65;
+  --accent-hover: #f2b07b;
+  --text-main: #f7efe6;
+  --text-muted: #b8a898;
+  --paper: #f6efe2;
+  --ink: #2b211a;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 42%, #241913 0%, #0d0908 100%);
+  font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: "Cormorant Garamond", Georgia, serif;
+}
+
+.font-handwriting {
+  font-family: "Caveat", cursive;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes vinyl-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-vinyl-spin {
+  animation: vinyl-spin 4s linear infinite;
+}
+
+.animate-vinyl-spin-45 {
+  animation: vinyl-spin 2.93s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-vinyl-spin,
+  .animate-vinyl-spin-45 {
+    animation: none;
+  }
+}
+
+/* Custom subtle scrollbar for drawers and sleeve letter */
+.custom-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(232, 159, 101, 0.25);
+  border-radius: 999px;
+}
+
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 159, 101, 0.45);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

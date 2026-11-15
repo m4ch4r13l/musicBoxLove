@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nuestros Discos — Tocadiscos 3D Interactivo</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;1,400;1,600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Caveat:wght@500;600&display=swap');
+
+    :root {
+      --bg-dark: #120e0c;
+      --panel-bg: rgba(24, 19, 16, 0.82);
+      --border-subtle: rgba(255, 224, 189, 0.14);
+      --accent: #e89f65;
+      --accent-glow: rgba(232, 159, 101, 0.35);
+      --text-main: #f7efe6;
+      --text-muted: #b5a596;
+      --paper: #f6efe2;
+      --ink: #2b211a;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 40%, #261b15 0%, #0d0908 100%);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: var(--text-main);
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+
+    /* Header flotante responsivo */
+    .top-bar {
+      position: fixed;
+      top: 20px;
+      left: 24px;
+      right: 24px;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      pointer-events: none;
+    }
+
+    .title-block {
+      pointer-events: auto;
+      max-width: 460px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 4px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    h1 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(24px, 3.5vw, 38px);
+      font-weight: 600;
+      line-height: 1.08;
+      color: var(--text-main);
+      text-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    .hint-badge {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: rgba(24, 19, 16, 0.65);
+      padding: 5px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      backdrop-filter: blur(6px);
+      pointer-events: none;
+    }
+
+    .actions-top {
+      display: flex;
+      gap: 10px;
+      pointer-events: auto;
+      flex-shrink: 0;
+    }
+
+    .btn {
+      background: var(--panel-bg);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 9px 15px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      transition: all 0.25s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: inherit;
+    }
+
+    .btn:hover {
+      border-color: var(--accent);
+      background: rgba(42, 32, 26, 0.92);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #1c120c;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .btn-primary:hover {
+      background: #f2ae78;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    /* Controles inferiores y selector de discos */
+    .bottom-dock {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: min(94vw, 720px);
+      pointer-events: none;
+    }
+
+    .now-playing-bar {
+      pointer-events: auto;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-subtle);
+      backdrop-filter: blur(16px);
+      border-radius: 18px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      width: 100%;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+    }
+
+    .track-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .mini-disc {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: conic-gradient(#111, #2b2b2b, #111, #262626, #111);
+      border: 2px solid rgba(255,255,255,0.12);
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      transition: transform 0.3s ease;
+    }
+
+    .mini-disc.spinning {
+      animation: spin 4s linear infinite;
+    }
+
+    .mini-disc-core {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid #111;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .track-text {
+      min-width: 0;
+    }
+
+    .track-title {
+      font-weight: 600;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-artist {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .playback-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .play-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: none;
+      background: var(--accent);
+      color: #1b110a;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .play-btn:hover {
+      transform: scale(1.06);
+      box-shadow: 0 0 18px var(--accent-glow);
+    }
+
+    .shelf-pills {
+      pointer-events: auto;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      max-width: 100%;
+      padding: 4px;
+      scrollbar-width: none;
+    }
+    .shelf-pills::-webkit-scrollbar { display: none; }
+
+    .vinyl-pill {
+      background: rgba(24, 19, 16, 0.78);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 7px 14px;
+      border-radius: 12px;
+      font-size: 12px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: inherit;
+    }
+
+    .vinyl-pill .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .vinyl-pill.active {
+      color: var(--text-main);
+      border-color: var(--accent);
+      background: rgba(48, 36, 29, 0.92);
+    }
+
+    /* Tarjeta de dedicatoria (Reverso de funda) */
+    .note-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      background: rgba(8, 6, 5, 0.72);
+      backdrop-filter: blur(8px);
+      display: none;
+      place-items: center;
+      padding: 20px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .note-modal-backdrop.open {
+      display: grid;
+      opacity: 1;
+    }
+
+    .sleeve-card {
+      background: var(--paper);
+      color: var(--ink);
+      width: min(92vw, 480px);
+      border-radius: 14px;
+      padding: 28px 26px;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.7), inset 0 0 40px rgba(168, 134, 96, 0.18);
+      position: relative;
+      transform: rotate(-0.8deg);
+      border: 1px solid rgba(90, 66, 44, 0.22);
+    }
+
+    .sleeve-header {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      border-bottom: 1px dashed rgba(43, 33, 26, 0.25);
+      padding-bottom: 16px;
+      margin-bottom: 16px;
+    }
+
+    .sleeve-cover {
+      width: 78px;
+      height: 78px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #2c221b;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.25);
+      flex-shrink: 0;
+    }
+
+    .sleeve-date {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #8c6239;
+      font-weight: 600;
+    }
+
+    .sleeve-song {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 24px;
+      font-weight: 600;
+      line-height: 1.15;
+      margin-top: 2px;
+    }
+
+    .sleeve-message {
+      font-family: 'Caveat', cursive;
+      font-size: 23px;
+      line-height: 1.42;
+      color: #2b211a;
+      white-space: pre-line;
+      max-height: 44vh;
+      overflow-y: auto;
+      user-select: text;
+    }
+
+    .sleeve-footer {
+      margin-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: #6e5846;
+    }
+
+    .close-paper {
+      background: #2b211a;
+      color: #f6efe2;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    /* Panel Lateral de Personalización (Modo Creador) */
+    .editor-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(94vw, 420px);
+      background: #17120f;
+      border-left: 1px solid var(--border-subtle);
+      z-index: 40;
+      padding: 22px;
+      overflow-y: auto;
+      transform: translateX(102%);
+      transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+      box-shadow: -20px 0 50px rgba(0,0,0,0.65);
+    }
+
+    .editor-drawer.open {
+      transform: translateX(0);
+    }
+
+    .editor-drawer h2 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 26px;
+      margin-bottom: 4px;
+    }
+
+    .field-group {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .field-group label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    .field-group input,
+    .field-group textarea,
+    .field-group select {
+      background: #221b17;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text-main);
+      padding: 9px 11px;
+      border-radius: 9px;
+      font-family: inherit;
+      font-size: 13px;
+      user-select: text;
+    }
+
+    .field-group textarea {
+      min-height: 76px;
+      resize: vertical;
+    }
+
+    .disc-editor-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 12px;
+      margin-top: 14px;
+    }
+
+    .disc-editor-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .toast {
+      position: fixed;
+      top: 76px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: var(--accent);
+      color: #1c120c;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Ajustes Responsivos para Móviles */
+    @media (max-width: 640px) {
+      .top-bar {
+        top: 14px;
+        left: 14px;
+        right: 14px;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .subtitle {
+        font-size: 12px;
+      }
+      .hint-badge {
+        display: none; /* Limpia espacio visual en pantallas pequeñas */
+      }
+      .actions-top {
+        width: 100%;
+        justify-content: flex-start;
+      }
+      .bottom-dock {
+        bottom: 14px;
+      }
+      .now-playing-bar {
+        padding: 10px 14px;
+        gap: 10px;
+      }
+      .sleeve-card {
+        padding: 20px 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+  <div id="toast" class="toast">Enlace copiado al portapapeles</div>
+
+  <!-- Barra superior -->
+  <header class="top-bar">
+    <div class="title-block">
+      <div class="eyebrow" id="ui-eyebrow" title="Doble clic para personalizar">Colección Privada • Ed. Especial</div>
+      <h1 id="ui-title">Para Ti, Mi Persona Favorita</h1>
+      <p class="subtitle" id="ui-subtitle">Toca el brazo del tocadiscos para reproducir o abre la dedicatoria de cada vinilo.</p>
+      <div class="hint-badge">Arrastra para rotar • Rueda para zoom • Clic en brazo o disco</div>
+    </div>
+    <div class="actions-top">
+      <button class="btn" id="btn-open-note" title="Leer nota escrita en la funda">
+        <span>💌</span> Leer Dedicatoria
+      </button>
+      <button class="btn" id="btn-toggle-editor" title="Personalizar canciones y mensajes">
+        <span>✨</span> Personalizar
+      </button>
+    </div>
+  </header>
+
+  <!-- Controles inferiores -->
+  <div class="bottom-dock">
+    <div class="shelf-pills" id="shelf-pills"></div>
+
+    <div class="now-playing-bar">
+      <div class="track-meta">
+        <div class="mini-disc" id="mini-disc">
+          <div class="mini-disc-core" id="mini-disc-core"></div>
+        </div>
+        <div class="track-text">
+          <div class="track-title" id="track-title">Cargando vinilo...</div>
+          <div class="track-artist" id="track-artist">Artista</div>
+        </div>
+      </div>
+
+      <div class="playback-controls">
+        <button class="btn" id="btn-prev" title="Disco anterior">⏮</button>
+        <button class="play-btn" id="btn-play" title="Reproducir / Pausar">▶</button>
+        <button class="btn" id="btn-next" title="Siguiente disco">⏭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Funda / Dedicatoria -->
+  <div class="note-modal-backdrop" id="note-modal">
+    <div class="sleeve-card">
+      <div class="sleeve-header">
+        <img id="modal-cover" class="sleeve-cover" alt="Portada" />
+        <div>
+          <div class="sleeve-date" id="modal-date">14 de Febrero</div>
+          <div class="sleeve-song" id="modal-song">Título de la Canción</div>
+          <div style="font-size:12px; color:#7a624e;" id="modal-artist">Artista</div>
+        </div>
+      </div>
+      <div class="sleeve-message" id="modal-message"></div>
+      <div class="sleeve-footer">
+        <span id="modal-signature">Con todo mi cariño</span>
+        <button class="close-paper" id="btn-close-note">Guardar funda</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cajón de Personalización -->
+  <aside class="editor-drawer" id="editor-drawer">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2>Personalizar Regalo</h2>
+      <button class="btn" id="btn-close-editor">✕</button>
+    </div>
+    <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+      Edita los textos, colores y canciones. Al compartir el enlace de regalo, el botón de edición se ocultará automáticamente para sorprender a esa persona.
+    </p>
+
+    <div class="field-group">
+      <label>Etiqueta superior</label>
+      <input type="text" id="inp-eyebrow" />
+    </div>
+    <div class="field-group">
+      <label>Título principal del regalo</label>
+      <input type="text" id="inp-title" />
+    </div>
+    <div class="field-group">
+      <label>Subtítulo / Instrucción</label>
+      <input type="text" id="inp-subtitle" />
+    </div>
+    <div class="field-group">
+      <label>Tu firma en las tarjetas</label>
+      <input type="text" id="inp-signature" />
+    </div>
+
+    <div id="discs-editor-list"></div>
+
+    <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;">
+      <button class="btn" id="btn-add-disc">+ Añadir Vinilo</button>
+      <button class="btn btn-primary" id="btn-share-link">🔗 Copiar Enlace Regalo</button>
+      <button class="btn" id="btn-export-json">⬇ Exportar JSON</button>
+    </div>
+  </aside>
+
+  <audio id="real-audio" crossorigin="anonymous"></audio>
+
+  <!-- Three.js & OrbitControls desde CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // =========================================================
+    // 1. UTILIDADES DE SEGURIDAD Y CODIFICACIÓN UTF-8 BASE64
+    // =========================================================
+    function sanitizeColor(colorStr, fallback = '#e89f65') {
+      if (typeof colorStr === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(colorStr.trim())) {
+        return colorStr.trim();
+      }
+      return fallback;
+    }
+
+    function encodeConfigToBase64(obj) {
+      const json = JSON.stringify(obj);
+      const bytes = new TextEncoder().encode(json);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    function decodeConfigFromBase64(base64Str) {
+      const binary = atob(base64Str);
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+      const json = new TextDecoder().decode(bytes);
+      return JSON.parse(json);
+    }
+
+    // =========================================================
+    // 2. CONFIGURACIÓN POR DEFECTO Y MODO REGALO
+    // =========================================================
+    const DEFAULT_CONFIG = {
+      eyebrow: "Nuestra Banda Sonora • Vol. I",
+      title: "Canciones que me recuerdan a ti",
+      subtitle: "Elige un vinilo, baja la aguja y lee lo que escribí detrás de cada funda.",
+      signature: "Siempre tuyo ♥",
+      discs: [
+        {
+          title: "La primera vez que te vi",
+          artist: "Melodía Nocturna (Sintetizador)",
+          date: "El comienzo de todo",
+          vinylColor: "#141414",
+          labelColor: "#d97742",
+          coverUrl: "",
+          audioUrl: "",
+          synthPreset: 0,
+          note: "Todavía recuerdo exactamente cómo iba el tiempo ese día. No sabía que una coincidencia tan simple se iba a convertir en mi lugar favorito del mundo.\n\nDale play y deja que gire un rato."
+        },
+        {
+          title: "Nuestros viajes sin prisa",
+          artist: "Acordes de Tarde (Sintetizador)",
+          date: "Kilómetros juntos",
+          vinylColor: "#5e1924",
+          labelColor: "#f0c987",
+          coverUrl: "",
+          audioUrl: "",
+          synthPreset: 1,
+          note: "No importa si vamos lejos o solo a dar la vuelta por un café: contigo cualquier trayecto suena bien. Gracias por ser mi mejor compañía."
+        },
+        {
+          title: "Lo que aún nos falta vivir",
+          artist: "Caja de Música (Sintetizador)",
+          date: "Para el futuro",
+          vinylColor: "#19384a",
+          labelColor: "#9ad1d4",
+          coverUrl: "",
+          audioUrl: "",
+          synthPreset: 2,
+          note: "Este disco todavía tiene espacio en blanco para todas las canciones, risas y aventuras que nos faltan por estrenar.\n\nTe quiero muchísimo."
+        }
+      ]
+    };
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasCustomData = urlParams.has('d');
+    const forceEditMode = urlParams.get('edit') === 'true';
+
+    function loadConfig() {
+      const encoded = urlParams.get('d');
+      if (encoded) {
+        try {
+          const parsed = decodeConfigFromBase64(encoded);
+          if (parsed && Array.isArray(parsed.discs) && parsed.discs.length > 0) {
+            return parsed;
+          }
+        } catch (e) {
+          console.warn("No se pudo decodificar la URL personalizada:", e);
+        }
+      }
+      return structuredClone(DEFAULT_CONFIG);
+    }
+
+    let config = loadConfig();
+    let currentDiscIndex = 0;
+    let isPlaying = false;
+
+    // Si es un enlace compartido (?d=...) y no tiene &edit=true, ocultamos el botón de edición
+    if (hasCustomData && !forceEditMode) {
+      document.getElementById('btn-toggle-editor').style.display = 'none';
+    }
+
+    // =========================================================
+    // 3. MOTOR DE AUDIO (MP3 Real + Sintetizador Lo-Fi / Vinilo)
+    // =========================================================
+    const realAudio = document.getElementById('real-audio');
+    let audioCtx = null;
+    let synthTimer = null;
+    let crackleNode = null;
+    let masterGain = null;
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0.28;
+        masterGain.connect(audioCtx.destination);
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function startVinylCrackle() {
+      initAudioContext();
+      if (crackleNode) return;
+      const bufferSize = audioCtx.sampleRate * 3;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        const r = Math.random();
+        data[i] = r > 0.9985 ? (Math.random() * 0.45 - 0.22) : (Math.random() * 0.012 - 0.006);
+      }
+      crackleNode = audioCtx.createBufferSource();
+      crackleNode.buffer = buffer;
+      crackleNode.loop = true;
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 1800;
+
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0.35;
+
+      crackleNode.connect(filter);
+      filter.connect(gain);
+      gain.connect(masterGain);
+      crackleNode.start();
+    }
+
+    function stopVinylCrackle() {
+      if (crackleNode) {
+        try { crackleNode.stop(); } catch (_) {}
+        crackleNode.disconnect();
+        crackleNode = null;
+      }
+    }
+
+    const MELODIES = [
+      [261.63, 329.63, 392.00, 493.88, 392.00, 329.63, 220.00, 261.63, 329.63, 392.00, 329.63, 261.63],
+      [293.66, 349.23, 440.00, 523.25, 440.00, 349.23, 261.63, 329.63, 392.00, 493.88, 392.00, 329.63],
+      [523.25, 659.25, 783.99, 659.25, 587.33, 698.46, 880.00, 698.46, 493.88, 587.33, 783.99, 587.33]
+    ];
+
+    function startSynthMelody(preset = 0) {
+      initAudioContext();
+      stopSynthMelody();
+      const notes = MELODIES[preset % MELODIES.length];
+      let step = 0;
+
+      const playNote = () => {
+        if (!isPlaying) return;
+        const freq = notes[step % notes.length];
+        step++;
+
+        const osc = audioCtx.createOscillator();
+        const subOsc = audioCtx.createOscillator();
+        const noteGain = audioCtx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+        subOsc.type = 'triangle';
+        subOsc.frequency.setValueAtTime(freq * 0.5, audioCtx.currentTime);
+
+        const now = audioCtx.currentTime;
+        noteGain.gain.setValueAtTime(0.001, now);
+        noteGain.gain.exponentialRampToValueAtTime(0.32, now + 0.06);
+        noteGain.gain.exponentialRampToValueAtTime(0.0008, now + 1.35);
+
+        osc.connect(noteGain);
+        subOsc.connect(noteGain);
+        noteGain.connect(masterGain);
+
+        osc.start(now);
+        subOsc.start(now);
+        osc.stop(now + 1.4);
+        subOsc.stop(now + 1.4);
+      };
+
+      playNote();
+      synthTimer = setInterval(playNote, 620);
+    }
+
+    function stopSynthMelody() {
+      if (synthTimer) {
+        clearInterval(synthTimer);
+        synthTimer = null;
+      }
+    }
+
+    function startAudioForCurrentDisc() {
+      const disc = config.discs[currentDiscIndex];
+      startVinylCrackle();
+      if (disc.audioUrl && disc.audioUrl.trim() !== "") {
+        stopSynthMelody();
+        realAudio.src = disc.audioUrl.trim();
+        realAudio.play().catch(() => {
+          startSynthMelody(disc.synthPreset ?? currentDiscIndex);
+        });
+      } else {
+        realAudio.pause();
+        startSynthMelody(disc.synthPreset ?? currentDiscIndex);
+      }
+    }
+
+    function stopAllAudio() {
+      realAudio.pause();
+      stopSynthMelody();
+      stopVinylCrackle();
+    }
+
+    // =========================================================
+    // 4. ESCENA 3D CON THREE.JS (Tocadiscos + Partículas)
+    // =========================================================
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x120d0b, 0.045);
+
+    const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 5.4, 6.8);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.minDistance = 4.2;
+    controls.maxDistance = 12;
+    controls.maxPolarAngle = Math.PI * 0.47;
+    controls.target.set(0, 0.4, 0);
+
+    // Luces cálidas de estudio íntimo
+    const ambientLight = new THREE.AmbientLight(0xffdfc2, 0.55);
+    scene.add(ambientLight);
+
+    const keyLight = new THREE.SpotLight(0xffcfa3, 55);
+    keyLight.position.set(4.5, 8, 5);
+    keyLight.angle = Math.PI / 4;
+    keyLight.penumbra = 0.6;
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(1024, 1024);
+    scene.add(keyLight);
+
+    const rimLight = new THREE.PointLight(0xe88b5a, 14, 15);
+    rimLight.position.set(-4.5, 3, -3.5);
+    scene.add(rimLight);
+
+    // Textura procedural de madera de nogal
+    function createWoodTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 512;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#4a2c18';
+      ctx.fillRect(0, 0, 512, 512);
+      for (let i = 0; i < 420; i++) {
+        ctx.strokeStyle = i % 2 === 0 ? 'rgba(28, 14, 6, 0.24)' : 'rgba(110, 68, 38, 0.16)';
+        ctx.lineWidth = 1 + Math.random() * 2.5;
+        ctx.beginPath();
+        const y = Math.random() * 512;
+        ctx.moveTo(0, y);
+        ctx.bezierCurveTo(170, y + (Math.random() - 0.5) * 18, 340, y + (Math.random() - 0.5) * 18, 512, y);
+        ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      return tex;
+    }
+
+    // Textura procedural de surcos de vinilo
+    function createVinylGroovesTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 512;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#888888';
+      ctx.fillRect(0, 0, 512, 512);
+      const cx = 256, cy = 256;
+      for (let r = 82; r < 248; r += 1.6) {
+        ctx.strokeStyle = r % 3.2 < 1.6 ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.25)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      return new THREE.CanvasTexture(c);
+    }
+
+    // Lienzo único reutilizable para la etiqueta central (Evita fugas de VRAM)
+    const labelCanvas = document.createElement('canvas');
+    labelCanvas.width = 512;
+    labelCanvas.height = 512;
+    const labelCtx = labelCanvas.getContext('2d');
+    const sharedLabelTexture = new THREE.CanvasTexture(labelCanvas);
+
+    function updateLabelTexture(disc) {
+      labelCtx.clearRect(0, 0, 512, 512);
+      labelCtx.fillStyle = sanitizeColor(disc.labelColor, '#d97742');
+      labelCtx.fillRect(0, 0, 512, 512);
+
+      // Aro decorativo
+      labelCtx.strokeStyle = 'rgba(255,255,255,0.55)';
+      labelCtx.lineWidth = 6;
+      labelCtx.beginPath();
+      labelCtx.arc(256, 256, 225, 0, Math.PI * 2);
+      labelCtx.stroke();
+
+      labelCtx.fillStyle = '#1c130d';
+      labelCtx.font = 'bold 26px Georgia, serif';
+      labelCtx.textAlign = 'center';
+      const shortTitle = String(disc.title || 'Nuestro Disco').slice(0, 22);
+      labelCtx.fillText(shortTitle, 256, 165);
+
+      labelCtx.font = '18px sans-serif';
+      labelCtx.fillStyle = 'rgba(28,19,13,0.78)';
+      labelCtx.fillText(String(disc.date || '33 RPM').slice(0, 24), 256, 365);
+
+      // Agujero central
+      labelCtx.fillStyle = '#111';
+      labelCtx.beginPath();
+      labelCtx.arc(256, 256, 24, 0, Math.PI * 2);
+      labelCtx.fill();
+
+      sharedLabelTexture.needsUpdate = true;
+    }
+
+    // Grupo principal del Tocadiscos
+    const turntable = new THREE.Group();
+    scene.add(turntable);
+
+    // Base de madera
+    const woodMat = new THREE.MeshStandardMaterial({
+      map: createWoodTexture(),
+      roughness: 0.48,
+      metalness: 0.08
+    });
+    const plinth = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.65, 4.1), woodMat);
+    plinth.position.y = 0.325;
+    plinth.castShadow = true;
+    plinth.receiveShadow = true;
+    turntable.add(plinth);
+
+    // Placa superior metálica cepillada
+    const deckMat = new THREE.MeshStandardMaterial({
+      color: 0x221d1a,
+      roughness: 0.35,
+      metalness: 0.75
+    });
+    const deckPlate = new THREE.Mesh(new THREE.BoxGeometry(4.85, 0.06, 3.75), deckMat);
+    deckPlate.position.y = 0.68;
+    deckPlate.receiveShadow = true;
+    turntable.add(deckPlate);
+
+    // Patas amortiguadoras
+    const footMat = new THREE.MeshStandardMaterial({ color: 0xd4a359, metalness: 0.85, roughness: 0.25 });
+    [[-2.2, -1.7], [2.2, -1.7], [-2.2, 1.7], [2.2, 1.7]].forEach(([fx, fz]) => {
+      const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.16, 24), footMat);
+      foot.position.set(fx, 0.04, fz);
+      turntable.add(foot);
+    });
+
+    // Grupo giratorio (Plato + Disco de vinilo + Etiqueta)
+    const platterGroup = new THREE.Group();
+    platterGroup.position.set(-0.48, 0.74, 0.05);
+    turntable.add(platterGroup);
+
+    const platterMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.62, 1.65, 0.14, 64),
+      new THREE.MeshStandardMaterial({ color: 0xb8b2aa, metalness: 0.88, roughness: 0.22 })
+    );
+    platterMesh.position.y = 0.07;
+    platterMesh.receiveShadow = true;
+    platterGroup.add(platterMesh);
+
+    // Disco de vinilo
+    const vinylMat = new THREE.MeshStandardMaterial({
+      color: 0x141414,
+      roughnessMap: createVinylGroovesTexture(),
+      roughness: 0.28,
+      metalness: 0.35
+    });
+    const vinylMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.56, 1.56, 0.03, 64), vinylMat);
+    vinylMesh.position.y = 0.155;
+    vinylMesh.castShadow = true;
+    platterGroup.add(vinylMesh);
+
+    // Etiqueta central
+    const labelMat = new THREE.MeshStandardMaterial({
+      map: sharedLabelTexture,
+      roughness: 0.65
+    });
+    const labelMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.54, 0.034, 48), labelMat);
+    labelMesh.position.y = 0.156;
+    platterGroup.add(labelMesh);
+
+    // Eje metálico central (spindle)
+    const spindle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.28, 20), footMat);
+    spindle.position.y = 0.22;
+    platterGroup.add(spindle);
+
+    // =========================================================
+    // BRAZO FONOCAPTOR ARTICULADO (Tonearm)
+    // =========================================================
+    const tonearmPivot = new THREE.Group();
+    tonearmPivot.position.set(1.78, 0.78, -1.15);
+    turntable.add(tonearmPivot);
+
+    const pivotBase = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.22, 32), footMat);
+    pivotBase.position.y = 0.11;
+    tonearmPivot.add(pivotBase);
+
+    const tonearmArm = new THREE.Group();
+    tonearmArm.position.y = 0.24;
+    tonearmPivot.add(tonearmArm);
+
+    const counterweight = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.26, 24), footMat);
+    counterweight.rotation.x = Math.PI / 2;
+    counterweight.position.set(0, 0.02, -0.35);
+    tonearmArm.add(counterweight);
+
+    const armTube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.032, 0.038, 2.35, 16),
+      new THREE.MeshStandardMaterial({ color: 0xe6dccf, metalness: 0.9, roughness: 0.18 })
+    );
+    armTube.rotation.x = Math.PI / 2;
+    armTube.position.set(0, 0.02, 0.95);
+    armTube.castShadow = true;
+    tonearmArm.add(armTube);
+
+    const headshell = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.28), deckMat);
+    headshell.position.set(-0.08, 0.01, 2.12);
+    headshell.rotation.y = 0.28;
+    tonearmArm.add(headshell);
+
+    const ledMat = new THREE.MeshStandardMaterial({
+      color: 0xff9d4d,
+      emissive: 0xff7b1c,
+      emissiveIntensity: 0.2
+    });
+    const powerLed = new THREE.Mesh(new THREE.SphereGeometry(0.055, 16, 16), ledMat);
+    powerLed.position.set(2.05, 0.72, 1.52);
+    turntable.add(powerLed);
+
+    // Partículas ambientales flotantes
+    const particlesCount = 160;
+    const pGeo = new THREE.BufferGeometry();
+    const pPos = new Float32Array(particlesCount * 3);
+    for (let i = 0; i < particlesCount; i++) {
+      pPos[i * 3] = (Math.random() - 0.5) * 14;
+      pPos[i * 3 + 1] = Math.random() * 6 + 0.2;
+      pPos[i * 3 + 2] = (Math.random() - 0.5) * 14;
+    }
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    const pMat = new THREE.PointsMaterial({
+      color: 0xffcfa0,
+      size: 0.045,
+      transparent: true,
+      opacity: 0.55
+    });
+    const ambientParticles = new THREE.Points(pGeo, pMat);
+    scene.add(ambientParticles);
+
+    // Raycaster para clic directo en el brazo o disco 3D
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let pointerDownPos = { x: 0, y: 0 };
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      if (dist > 6) return;
+
+      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+
+      const hits = raycaster.intersectObjects([tonearmArm, vinylMesh, labelMesh], true);
+      if (hits.length > 0) {
+        togglePlayback();
+      }
+    });
+
+    // =========================================================
+    // 5. SINCRONIZACIÓN DE UI Y ESTADO DEL VINILO (Segura contra XSS)
+    // =========================================================
+    let platterSpeed = 0;
+    let targetArmYaw = -0.36;
+    let targetArmPitch = -0.05;
+
+    function selectDisc(index) {
+      if (!config.discs.length) return;
+      currentDiscIndex = (index + config.discs.length) % config.discs.length;
+      const disc = config.discs[currentDiscIndex];
+
+      const safeVinylColor = sanitizeColor(disc.vinylColor, '#141414');
+      const safeLabelColor = sanitizeColor(disc.labelColor, '#e89f65');
+
+      // Actualizar materiales 3D reutilizando textura
+      vinylMat.color.set(safeVinylColor);
+      updateLabelTexture(disc);
+
+      // Actualizar UI inferior
+      document.getElementById('track-title').textContent = disc.title;
+      document.getElementById('track-artist').textContent = `${disc.artist} • ${disc.date}`;
+      document.getElementById('mini-disc-core').style.background = safeLabelColor;
+
+      // Actualizar píldoras de selección
+      document.querySelectorAll('.vinyl-pill').forEach((pill, i) => {
+        pill.classList.toggle('active', i === currentDiscIndex);
+      });
+
+      if (isPlaying) {
+        startAudioForCurrentDisc();
+      }
+    }
+
+    function togglePlayback(forceState) {
+      isPlaying = typeof forceState === 'boolean' ? forceState : !isPlaying;
+      const playBtn = document.getElementById('btn-play');
+      const miniDisc = document.getElementById('mini-disc');
+
+      if (isPlaying) {
+        playBtn.textContent = '⏸';
+        miniDisc.classList.add('spinning');
+        targetArmYaw = 0.24;
+        targetArmPitch = 0.045;
+        ledMat.emissiveIntensity = 2.4;
+        startAudioForCurrentDisc();
+      } else {
+        playBtn.textContent = '▶';
+        miniDisc.classList.remove('spinning');
+        targetArmYaw = -0.36;
+        targetArmPitch = -0.05;
+        ledMat.emissiveIntensity = 0.2;
+        stopAllAudio();
+      }
+    }
+
+    function renderShelfAndHeaders() {
+      document.getElementById('ui-eyebrow').textContent = config.eyebrow;
+      document.getElementById('ui-title').textContent = config.title;
+      document.getElementById('ui-subtitle').textContent = config.subtitle;
+
+      const shelf = document.getElementById('shelf-pills');
+      shelf.replaceChildren();
+
+      config.discs.forEach((disc, idx) => {
+        const btn = document.createElement('button');
+        btn.className = `vinyl-pill ${idx === currentDiscIndex ? 'active' : ''}`;
+
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.style.background = sanitizeColor(disc.labelColor, '#e89f65');
+
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = disc.title || `Disco #${idx + 1}`;
+
+        btn.append(dot, titleSpan);
+        btn.onclick = () => selectDisc(idx);
+        shelf.appendChild(btn);
+      });
+    }
+
+    // Modal de dedicatoria
+    function openNoteModal() {
+      const disc = config.discs[currentDiscIndex];
+      document.getElementById('modal-date').textContent = disc.date || 'Recuerdo Especial';
+      document.getElementById('modal-song').textContent = disc.title;
+      document.getElementById('modal-artist').textContent = disc.artist;
+      document.getElementById('modal-message').textContent = disc.note;
+      document.getElementById('modal-signature').textContent = config.signature;
+
+      const coverEl = document.getElementById('modal-cover');
+      if (disc.coverUrl && /^https?:\/\//i.test(disc.coverUrl.trim())) {
+        coverEl.src = disc.coverUrl.trim();
+      } else {
+        const vCol = sanitizeColor(disc.vinylColor, '#1c1917');
+        const lCol = sanitizeColor(disc.labelColor, '#e89f65');
+        const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'>
+          <rect width='200' height='200' fill='${vCol}'/>
+          <circle cx='100' cy='100' r='74' fill='none' stroke='rgba(255,255,255,0.15)' stroke-width='2'/>
+          <circle cx='100' cy='100' r='36' fill='${lCol}'/>
+          <circle cx='100' cy='100' r='8' fill='#141414'/>
+        </svg>`;
+        coverEl.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+      }
+
+      document.getElementById('note-modal').classList.add('open');
+    }
+
+    document.getElementById('btn-open-note').onclick = openNoteModal;
+    document.getElementById('btn-close-note').onclick = () => {
+      document.getElementById('note-modal').classList.remove('open');
+    };
+    document.getElementById('note-modal').onclick = (e) => {
+      if (e.target.id === 'note-modal') e.target.classList.remove('open');
+    };
+
+    document.getElementById('btn-play').onclick = () => togglePlayback();
+    document.getElementById('btn-prev').onclick = () => selectDisc(currentDiscIndex - 1);
+    document.getElementById('btn-next').onclick = () => selectDisc(currentDiscIndex + 1);
+
+    // =========================================================
+    // 6. EDITOR DE PERSONALIZACIÓN Y EXPORTACIÓN DE ENLACE
+    // =========================================================
+    const drawer = document.getElementById('editor-drawer');
+    const discsEditorList = document.getElementById('discs-editor-list');
+
+    function populateEditor() {
+      document.getElementById('inp-eyebrow').value = config.eyebrow || '';
+      document.getElementById('inp-title').value = config.title || '';
+      document.getElementById('inp-subtitle').value = config.subtitle || '';
+      document.getElementById('inp-signature').value = config.signature || '';
+
+      discsEditorList.replaceChildren();
+
+      config.discs.forEach((disc, i) => {
+        const card = document.createElement('div');
+        card.className = 'disc-editor-card';
+        card.innerHTML = `
+          <div class="disc-editor-header">
+            <span class="disc-num"></span>
+            ${config.discs.length > 1 ? `<button class="btn" data-del="${i}" style="padding:3px 8px; font-size:11px;">Eliminar</button>` : ''}
+          </div>
+          <div class="field-group">
+            <label>Título de la canción / recuerdo</label>
+            <input type="text" data-idx="${i}" data-key="title" />
+          </div>
+          <div class="field-group">
+            <label>Artista o subtítulo</label>
+            <input type="text" data-idx="${i}" data-key="artist" />
+          </div>
+          <div class="field-group">
+            <label>Fecha o etiqueta</label>
+            <input type="text" data-idx="${i}" data-key="date" />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div class="field-group">
+              <label>Color Vinilo</label>
+              <input type="color" data-idx="${i}" data-key="vinylColor" style="height:36px; padding:2px;" />
+            </div>
+            <div class="field-group">
+              <label>Color Etiqueta</label>
+              <input type="color" data-idx="${i}" data-key="labelColor" style="height:36px; padding:2px;" />
+            </div>
+          </div>
+          <div class="field-group">
+            <label>URL de Audio MP3 (opcional, vacío = melodía sintetizada)</label>
+            <input type="url" placeholder="https://.../cancion.mp3" data-idx="${i}" data-key="audioUrl" />
+          </div>
+          <div class="field-group">
+            <label>URL de Foto de Portada (opcional)</label>
+            <input type="url" placeholder="https://.../foto.jpg" data-idx="${i}" data-key="coverUrl" />
+          </div>
+          <div class="field-group">
+            <label>Dedicatoria al reverso de la funda</label>
+            <textarea data-idx="${i}" data-key="note"></textarea>
+          </div>
+        `;
+
+        // Asignación segura mediante propiedades DOM (100% inmune a XSS)
+        card.querySelector('.disc-num').textContent = `Vinilo #${i + 1}`;
+        card.querySelector('[data-key="title"]').value = disc.title || '';
+        card.querySelector('[data-key="artist"]').value = disc.artist || '';
+        card.querySelector('[data-key="date"]').value = disc.date || '';
+        card.querySelector('[data-key="vinylColor"]').value = sanitizeColor(disc.vinylColor, '#141414');
+        card.querySelector('[data-key="labelColor"]').value = sanitizeColor(disc.labelColor, '#e89f65');
+        card.querySelector('[data-key="audioUrl"]').value = disc.audioUrl || '';
+        card.querySelector('[data-key="coverUrl"]').value = disc.coverUrl || '';
+        card.querySelector('[data-key="note"]').value = disc.note || '';
+
+        discsEditorList.appendChild(card);
+      });
+
+      // Listeners en tiempo real
+      drawer.querySelectorAll('input, textarea').forEach(el => {
+        el.oninput = () => {
+          if (el.id === 'inp-eyebrow') config.eyebrow = el.value;
+          else if (el.id === 'inp-title') config.title = el.value;
+          else if (el.id === 'inp-subtitle') config.subtitle = el.value;
+          else if (el.id === 'inp-signature') config.signature = el.value;
+          else if (el.dataset.idx !== undefined) {
+            const idx = Number(el.dataset.idx);
+            config.discs[idx][el.dataset.key] = el.value;
+          }
+          renderShelfAndHeaders();
+          selectDisc(currentDiscIndex);
+        };
+      });
+
+      drawer.querySelectorAll('[data-del]').forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.del);
+          config.discs.splice(idx, 1);
+          if (currentDiscIndex >= config.discs.length) currentDiscIndex = 0;
+          populateEditor();
+          renderShelfAndHeaders();
+          selectDisc(currentDiscIndex);
+        };
+      });
+    }
+
+    function openEditorDrawer() {
+      populateEditor();
+      drawer.classList.add('open');
+    }
+
+    document.getElementById('btn-toggle-editor').onclick = openEditorDrawer;
+    // Atajo secreto: doble clic en la etiqueta superior para abrir el editor incluso en modo regalo
+    document.getElementById('ui-eyebrow').ondblclick = openEditorDrawer;
+    document.getElementById('btn-close-editor').onclick = () => drawer.classList.remove('open');
+
+    document.getElementById('btn-add-disc').onclick = () => {
+      config.discs.push({
+        title: `Recuerdo #${config.discs.length + 1}`,
+        artist: "Nuestra canción",
+        date: "Fecha especial",
+        vinylColor: "#24192e",
+        labelColor: "#e89f65",
+        coverUrl: "",
+        audioUrl: "",
+        synthPreset: config.discs.length % 3,
+        note: "Escribe aquí tu dedicatoria..."
+      });
+      populateEditor();
+      renderShelfAndHeaders();
+      selectDisc(config.discs.length - 1);
+    };
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2600);
+    }
+
+    document.getElementById('btn-share-link').onclick = () => {
+      const encoded = encodeConfigToBase64(config);
+      const url = `${window.location.origin}${window.location.pathname}?d=${encoded}`;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast("🔗 ¡Enlace de regalo copiado!");
+      });
+    };
+
+    document.getElementById('btn-export-json').onclick = () => {
+      const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'config-tocadiscos.json';
+      a.click();
+    };
+
+    if (forceEditMode) {
+      openEditorDrawer();
+    }
+
+    // =========================================================
+    // 7. BUCLE DE ANIMACIÓN (60 FPS)
+    // =========================================================
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = clock.getDelta();
+      const elapsed = clock.getElapsedTime();
+
+      // Inercia realista de aceleración y frenado del plato
+      const targetSpeed = isPlaying ? 2.4 : 0;
+      platterSpeed += (targetSpeed - platterSpeed) * Math.min(1, dt * 3.5);
+      platterGroup.rotation.y -= platterSpeed * dt;
+
+      // Movimiento suave del brazo fonocaptor
+      tonearmArm.rotation.y += (targetArmYaw - tonearmArm.rotation.y) * Math.min(1, dt * 5);
+      tonearmArm.rotation.x += (targetArmPitch - tonearmArm.rotation.x) * Math.min(1, dt * 6);
+
+      // Micro-oscilación de seguimiento cuando suena
+      if (isPlaying && platterSpeed > 1.8) {
+        tonearmArm.rotation.y += Math.sin(elapsed * 2.5) * 0.0006;
+      }
+
+      // Flotación suave de partículas ambientales
+      ambientParticles.rotation.y = elapsed * 0.03;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Inicializar estado
+    renderShelfAndHeaders();
+    selectDisc(0);
+    animate();
+  </script>
+</body>
+</html>
