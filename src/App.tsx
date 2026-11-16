@@ -54,6 +54,11 @@ export default function App() {
   const [cloudGifts, setCloudGifts] = useState<CloudGiftRecord[]>([]);
   const [libraryItems, setLibraryItems] = useState<CloudMediaAsset[]>([]);
   const [cloudSaving, setCloudSaving] = useState(false);
+  const [cloudGiftLoading, setCloudGiftLoading] = useState<boolean>(() =>
+    Boolean(initialState.cloudGiftId)
+  );
+  const [cloudGiftError, setCloudGiftError] = useState<string | null>(null);
+  const [sceneReady, setSceneReady] = useState(false);
   const [uploadState, setUploadState] = useState<{
     discIndex: number;
     kind: 'audio' | 'cover';
@@ -178,6 +183,8 @@ export default function App() {
     const giftId = initialState.cloudGiftId;
     if (!giftId) return;
     let cancelled = false;
+    setCloudGiftLoading(true);
+    setCloudGiftError(null);
 
     loadGiftById(giftId)
       .then((record) => {
@@ -188,20 +195,23 @@ export default function App() {
           setClientLabel(record.clientLabel);
           setIsPublished(record.isPublished);
           setCurrentDiscIndex(0);
+          setCloudGiftLoading(false);
         } else {
-          showToast('No se encontró este regalo o el enlace expiró');
+          setCloudGiftError('No se encontró este regalo o el enlace ya expiró.');
+          setCloudGiftLoading(false);
         }
       })
       .catch((err) => {
         if (cancelled) return;
         console.error(err);
-        showToast('No se pudo abrir el regalo (puede que aún esté en borrador)');
+        setCloudGiftError('Este regalo no está disponible o aún se encuentra en borrador.');
+        setCloudGiftLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [initialState.cloudGiftId, showToast]);
+  }, [initialState.cloudGiftId]);
 
   const safeDiscIndex = Math.min(currentDiscIndex, Math.max(0, config.discs.length - 1));
   const currentDisc = config.discs[safeDiscIndex] ?? DEFAULT_CONFIG.discs[0];
@@ -571,34 +581,88 @@ export default function App() {
       ? audioStatus.currentTime / audioStatus.duration
       : -1;
 
+  const canRenderTurntable = !cloudGiftLoading && !cloudGiftError;
+  const showLoadingOverlay = cloudGiftLoading || (!cloudGiftError && !sceneReady);
+
   return (
     <main className="relative w-full h-full overflow-hidden select-none">
-      {/* Full-viewport 3D Turntable */}
-      <TurntableCanvas
-        ref={canvasRef}
-        currentDisc={currentDisc}
-        isPlaying={isPlaying}
-        rpm={rpm}
-        finish={config.finish ?? 'walnut'}
-        environment={config.environment ?? 'valley'}
-        dustCoverOpen={dustCoverOpen}
-        cameraPreset={cameraPreset}
-        presetRequestTick={presetRequestTick}
-        playbackProgress={playbackProgress}
-        getAudioLevels={() =>
-          audioEngineRef.current?.sampleReactiveLevels() ?? {
-            bass: 0,
-            mid: 0,
-            high: 0,
-            pulse: 0,
-            active: false,
+      {/* Full-viewport 3D Turntable (mounted only after cloud gift resolves so demo state never flashes) */}
+      {canRenderTurntable && (
+        <TurntableCanvas
+          ref={canvasRef}
+          currentDisc={currentDisc}
+          isPlaying={isPlaying}
+          rpm={rpm}
+          finish={config.finish ?? 'walnut'}
+          environment={config.environment ?? 'valley'}
+          dustCoverOpen={dustCoverOpen}
+          cameraPreset={cameraPreset}
+          presetRequestTick={presetRequestTick}
+          playbackProgress={playbackProgress}
+          getAudioLevels={() =>
+            audioEngineRef.current?.sampleReactiveLevels() ?? {
+              bass: 0,
+              mid: 0,
+              high: 0,
+              pulse: 0,
+              active: false,
+            }
           }
-        }
-        onTogglePlay={handleTogglePlay}
-        onToggleRpm={handleToggleRpm}
-        onCueReady={() => audioEngineRef.current?.commitCuePlayback(true)}
-        onRestartLift={() => audioEngineRef.current?.pauseForCue(true)}
-      />
+          onTogglePlay={handleTogglePlay}
+          onToggleRpm={handleToggleRpm}
+          onCueReady={() => audioEngineRef.current?.commitCuePlayback(true)}
+          onRestartLift={() => audioEngineRef.current?.pauseForCue(true)}
+          onSceneReady={() => setSceneReady(true)}
+        />
+      )}
+
+      {/* Unavailable Gift Screen */}
+      {cloudGiftError && (
+        <div
+          role="alert"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 text-center bg-[radial-gradient(circle_at_50%_40%,#241913_0%,#0d0908_100%)]"
+        >
+          <div className="w-16 h-16 rounded-full border border-[#e89f65]/30 bg-[#1a130f] grid place-items-center mb-5 shadow-[0_12px_40px_rgba(0,0,0,0.6)]">
+            <span className="w-4 h-4 rounded-full bg-[#e89f65]/70" />
+          </div>
+          <h1 className="font-display text-3xl font-semibold text-[#f7efe6]">
+            Regalo no disponible
+          </h1>
+          <p className="text-sm text-[#b8a898] mt-2 max-w-sm leading-relaxed">
+            {cloudGiftError}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-6 px-4 py-2 rounded-lg bg-[#e89f65] hover:bg-[#f2b07b] text-[#1c120c] text-xs font-semibold transition-colors cursor-pointer"
+          >
+            Volver a intentar
+          </button>
+        </div>
+      )}
+
+      {/* Warm Vinyl Loading Overlay */}
+      <div
+        aria-hidden={!showLoadingOverlay}
+        className={`fixed inset-0 z-50 flex flex-col items-center justify-center px-6 text-center bg-[radial-gradient(circle_at_50%_42%,#241913_0%,#0d0908_100%)] transition-opacity duration-500 ${
+          showLoadingOverlay ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full bg-[#e89f65]/15 blur-xl" />
+          <div className="w-24 h-24 rounded-full border border-[#ffe0bd]/15 bg-[radial-gradient(circle,#1e1a18_0%,#0c0a09_64%,#1c1816_66%,#090807_100%)] shadow-[0_18px_48px_rgba(0,0,0,0.75)] flex items-center justify-center animate-vinyl-spin">
+            <div className="w-8 h-8 rounded-full bg-[#e89f65] flex items-center justify-center border border-[#fff0dc]/40">
+              <div className="w-2 h-2 rounded-full bg-[#120d0b]" />
+            </div>
+          </div>
+        </div>
+        <p className="font-display text-2xl sm:text-3xl font-semibold text-[#f7efe6] tracking-wide">
+          {initialState.cloudGiftId ? 'Preparando tu regalo...' : 'Cargando tocadiscos...'}
+        </p>
+        <p className="text-xs text-[#b8a898] mt-1.5">
+          Ajustando la aguja y preparando los vinilos
+        </p>
+      </div>
 
       {/* Toast Notification */}
       {toastMessage && (
@@ -612,66 +676,73 @@ export default function App() {
       )}
 
       {/* Minimal Editorial Top Header */}
-      <TopBar
-        eyebrow={config.eyebrow}
-        title={config.title}
-        subtitle={config.subtitle}
-        showEditorButton={showEditorButton}
-        isPreviewingGift={isPreviewingGift}
-        onOpenNote={() => setNoteOpen(true)}
-        onOpenEditor={() => {
-          setIsPreviewingGift(false);
-          setEditorOpen(true);
-        }}
-        onExitPreview={() => {
-          setIsPreviewingGift(false);
-          setEditorOpen(true);
-        }}
-      />
+      {canRenderTurntable && (
+        <TopBar
+          eyebrow={config.eyebrow}
+          title={config.title}
+          subtitle={config.subtitle}
+          showEditorButton={showEditorButton}
+          isPreviewingGift={isPreviewingGift}
+          onOpenNote={() => setNoteOpen(true)}
+          onOpenEditor={() => {
+            setIsPreviewingGift(false);
+            setEditorOpen(true);
+          }}
+          onExitPreview={() => {
+            setIsPreviewingGift(false);
+            setEditorOpen(true);
+          }}
+        />
+      )}
 
       {/* Unified Collapsible Bottom Control Dock */}
-      <BottomDock
-        discs={config.discs}
-        currentIndex={safeDiscIndex}
-        isPlaying={isPlaying}
-        rpm={rpm}
-        dustCoverOpen={dustCoverOpen}
-        crackleEnabled={crackleEnabled}
-        volume={volume}
-        cameraPreset={cameraPreset}
-        dockCollapsed={dockCollapsed}
-        audioStatus={audioStatus}
-        onToggleDock={() => setDockCollapsed((c) => !c)}
-        onSelectDisc={handleSelectDisc}
-        onTogglePlay={handleTogglePlay}
-        onPrevDisc={handlePrevDisc}
-        onNextDisc={handleNextDisc}
-        onToggleRpm={handleToggleRpm}
-        onToggleDustCover={() => setDustCoverOpen((o) => !o)}
-        onToggleCrackle={handleToggleCrackle}
-        onChangeVolume={handleChangeVolume}
-        onSelectCameraPreset={handleSelectCameraPreset}
-        onZoomIn={() => canvasRef.current?.zoomIn()}
-        onZoomOut={() => canvasRef.current?.zoomOut()}
-        onSeek={(sec) => audioEngineRef.current?.seekTo(sec)}
-      />
+      {canRenderTurntable && (
+        <BottomDock
+          discs={config.discs}
+          currentIndex={safeDiscIndex}
+          isPlaying={isPlaying}
+          rpm={rpm}
+          dustCoverOpen={dustCoverOpen}
+          crackleEnabled={crackleEnabled}
+          volume={volume}
+          cameraPreset={cameraPreset}
+          dockCollapsed={dockCollapsed}
+          audioStatus={audioStatus}
+          onToggleDock={() => setDockCollapsed((c) => !c)}
+          onSelectDisc={handleSelectDisc}
+          onTogglePlay={handleTogglePlay}
+          onPrevDisc={handlePrevDisc}
+          onNextDisc={handleNextDisc}
+          onToggleRpm={handleToggleRpm}
+          onToggleDustCover={() => setDustCoverOpen((o) => !o)}
+          onToggleCrackle={handleToggleCrackle}
+          onChangeVolume={handleChangeVolume}
+          onSelectCameraPreset={handleSelectCameraPreset}
+          onZoomIn={() => canvasRef.current?.zoomIn()}
+          onZoomOut={() => canvasRef.current?.zoomOut()}
+          onSeek={(sec) => audioEngineRef.current?.seekTo(sec)}
+        />
+      )}
 
       {/* Tactile Paper Sleeve Dedication Modal */}
-      <DedicationModal
-        open={noteOpen}
-        disc={currentDisc}
-        discIndex={safeDiscIndex}
-        totalDiscs={config.discs.length}
-        signature={config.signature}
-        isPlaying={isPlaying}
-        onClose={() => setNoteOpen(false)}
-        onPrevDisc={handlePrevDisc}
-        onNextDisc={handleNextDisc}
-        onTogglePlay={handleTogglePlay}
-      />
+      {canRenderTurntable && (
+        <DedicationModal
+          open={noteOpen}
+          disc={currentDisc}
+          discIndex={safeDiscIndex}
+          totalDiscs={config.discs.length}
+          signature={config.signature}
+          isPlaying={isPlaying}
+          onClose={() => setNoteOpen(false)}
+          onPrevDisc={handlePrevDisc}
+          onNextDisc={handleNextDisc}
+          onTogglePlay={handleTogglePlay}
+        />
+      )}
 
       {/* Creator Customization Drawer */}
-      <EditorDrawer
+      {!cloudGiftLoading && !cloudGiftError && (
+        <EditorDrawer
         open={editorOpen}
         config={config}
         currentDiscIndex={safeDiscIndex}
@@ -708,7 +779,8 @@ export default function App() {
         onDeleteCloudGift={handleDeleteCloudGift}
         onDeleteMediaAsset={handleDeleteMediaAsset}
         onUploadDiscMedia={handleUploadDiscMedia}
-      />
+        />
+      )}
     </main>
   );
 }

@@ -32,6 +32,7 @@ interface TurntableCanvasProps {
   onToggleRpm: () => void;
   onCueReady?: () => void;
   onRestartLift?: () => void;
+  onSceneReady?: () => void;
 }
 
 export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvasProps>(
@@ -51,6 +52,7 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
       onToggleRpm,
       onCueReady,
       onRestartLift,
+      onSceneReady,
     },
     ref
   ) {
@@ -76,11 +78,13 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
   const onToggleRpmRef = useRef(onToggleRpm);
   const onCueReadyRef = useRef(onCueReady);
   const onRestartLiftRef = useRef(onRestartLift);
+  const onSceneReadyRef = useRef(onSceneReady);
   const getAudioLevelsRef = useRef(getAudioLevels);
   onTogglePlayRef.current = onTogglePlay;
   onToggleRpmRef.current = onToggleRpm;
   onCueReadyRef.current = onCueReady;
   onRestartLiftRef.current = onRestartLift;
+  onSceneReadyRef.current = onSceneReady;
   getAudioLevelsRef.current = getAudioLevels;
 
   const [webglError, setWebglError] = useState(false);
@@ -89,6 +93,7 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
     const container = mountRef.current;
     if (!container) return;
 
+    let rafId = 0;
     try {
       const controller = new TurntableScene(container, {
         onTogglePlay: () => onTogglePlayRef.current(),
@@ -107,12 +112,17 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
         onContextRestored: () => setWebglError(false),
       });
       sceneRef.current = controller;
+      rafId = window.requestAnimationFrame(() => {
+        onSceneReadyRef.current?.();
+      });
       return () => {
+        window.cancelAnimationFrame(rafId);
         controller.dispose();
         sceneRef.current = null;
       };
     } catch {
       setWebglError(true);
+      onSceneReadyRef.current?.();
     }
   }, []);
 
