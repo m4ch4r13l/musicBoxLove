@@ -122,6 +122,12 @@ export class TurntableScene {
   private targetZoomDistance: number | null = null;
   private cinematicActive = false;
   private cinematicTime = 0;
+  private cinematicZoomScale = 1;
+  private currentCinematicZoom = 1;
+  private activePointers = new Map<number, { x: number; y: number }>();
+  private lastPinchDist = 0;
+  private wasPinching = false;
+  private lastPinchEndMs = 0;
 
   // Scene references for animation & updates
   private platterGroup: THREE.Group;
@@ -216,7 +222,6 @@ export class TurntableScene {
     this.controls.target.set(...CAMERA_PRESETS.overview.target);
     this.controls.addEventListener('start', () => {
       this.activeCameraTransition = false;
-      this.cinematicActive = false;
       this.targetZoomDistance = null;
     });
 
@@ -798,19 +803,87 @@ export class TurntableScene {
   private bindEvents(): void {
     const dom = this.renderer.domElement;
 
+    dom.addEventListener('wheel', this.handleWheel, { passive: false, capture: true });
     dom.addEventListener('pointerdown', this.handlePointerDown);
     dom.addEventListener('pointermove', this.handlePointerMove);
     dom.addEventListener('pointerup', this.handlePointerUp);
+    dom.addEventListener('pointercancel', this.handlePointerCancel);
     dom.addEventListener('webglcontextlost', this.handleContextLost);
     dom.addEventListener('webglcontextrestored', this.handleContextRestored);
     window.addEventListener('resize', this.handleResize);
   }
 
+  private getPinchDistance(): number {
+    if (this.activePointers.size < 2) return 0;
+    const iter = this.activePointers.values();
+    const p1 = iter.next().value;
+    const p2 = iter.next().value;
+    if (!p1 || !p2) return 0;
+    return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  }
+
+  private handleWheel = (e: WheelEvent): void => {
+    if (!this.cinematicActive) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const factor = Math.exp(e.deltaY * 0.0011);
+    this.cinematicZoomScale = THREE.MathUtils.clamp(
+      this.cinematicZoomScale * factor,
+      0.32,
+      4.2
+    );
+  };
+
   private handlePointerDown = (e: PointerEvent): void => {
-    this.pointerDownPos = { x: e.clientX, y: e.clientY };
+    this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.activePointers.size === 1) {
+      this.pointerDownPos = { x: e.clientX, y: e.clientY };
+    } else if (this.activePointers.size === 2) {
+      this.wasPinching = true;
+      this.lastPinchDist = this.getPinchDistance();
+    }
   };
 
   private handlePointerMove = (e: PointerEvent): void => {
+    const tracked = this.activePointers.get(e.pointerId);
+    if (tracked) {
+      tracked.x = e.clientX;
+      tracked.y = e.clientY;
+    }
+
+    if (this.cinematicActive) {
+      if (this.activePointers.size === 2) {
+        const dist = this.getPinchDistance();
+        if (this.lastPinchDist > 4 && dist > 4) {
+          const ratio = this.lastPinchDist / dist;
+          this.cinematicZoomScale = THREE.MathUtils.clamp(
+            this.cinematicZoomScale * ratio,
+            0.32,
+            4.2
+          );
+        }
+        this.lastPinchDist = dist;
+        return;
+      }
+
+      if (
+        tracked &&
+        this.activePointers.size === 1 &&
+        !this.wasPinching &&
+        performance.now() - this.lastPinchEndMs > 250
+      ) {
+        const dragDist = Math.hypot(
+          e.clientX - this.pointerDownPos.x,
+          e.clientY - this.pointerDownPos.y
+        );
+        if (dragDist > 14) {
+          this.cinematicActive = false;
+          this.controls.enabled = true;
+          this.controls.update();
+        }
+      }
+    }
+
     const now = performance.now();
     if (now - this.lastHoverRaycast < 55) return;
     this.lastHoverRaycast = now;
@@ -824,7 +897,29 @@ export class TurntableScene {
     this.renderer.domElement.style.cursor = hits.length > 0 ? 'pointer' : 'grab';
   };
 
+  private handlePointerCancel = (e: PointerEvent): void => {
+    this.activePointers.delete(e.pointerId);
+    if (this.wasPinching && this.activePointers.size < 2) {
+      this.lastPinchEndMs = performance.now();
+      this.lastPinchDist = 0;
+      if (this.activePointers.size === 0) {
+        this.wasPinching = false;
+      }
+    }
+  };
+
   private handlePointerUp = (e: PointerEvent): void => {
+    const wasPinchGesture = this.wasPinching;
+    this.activePointers.delete(e.pointerId);
+    if (this.wasPinching && this.activePointers.size < 2) {
+      this.lastPinchEndMs = performance.now();
+      this.lastPinchDist = 0;
+      if (this.activePointers.size === 0) {
+        this.wasPinching = false;
+      }
+    }
+    if (wasPinchGesture) return;
+
     const dist = Math.hypot(
       e.clientX - this.pointerDownPos.x,
       e.clientY - this.pointerDownPos.y
@@ -971,16 +1066,27 @@ export class TurntableScene {
     if (preset === 'cinematic') {
       this.cinematicActive = true;
       this.cinematicTime = 0;
+      this.cinematicZoomScale = 1;
+      this.currentCinematicZoom = 1;
       this.activeCameraTransition = false;
+      this.controls.enabled = false;
     } else {
       this.cinematicActive = false;
+      this.controls.enabled = true;
       this.activeCameraTransition = true;
     }
   }
 
   public zoomBy(multiplier: number): void {
+    if (this.cinematicActive) {
+      this.cinematicZoomScale = THREE.MathUtils.clamp(
+        this.cinematicZoomScale * multiplier,
+        0.32,
+        4.2
+      );
+      return;
+    }
     this.activeCameraTransition = false;
-    this.cinematicActive = false;
     const currentDist =
       this.targetZoomDistance ?? this.camera.position.distanceTo(this.controls.target);
     this.targetZoomDistance = THREE.MathUtils.clamp(
@@ -1284,13 +1390,26 @@ export class TurntableScene {
         _targetLookAt.set(0, 0.65, -0.2);
       }
 
-      this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _targetCamPos.x, 2.2, dt);
-      this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _targetCamPos.y, 2.2, dt);
-      this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _targetCamPos.z, 2.2, dt);
+      this.currentCinematicZoom = THREE.MathUtils.damp(
+        this.currentCinematicZoom,
+        this.cinematicZoomScale,
+        8,
+        dt
+      );
+      _zoomOffset
+        .subVectors(_targetCamPos, _targetLookAt)
+        .multiplyScalar(this.currentCinematicZoom);
+      _targetCamPos.copy(_targetLookAt).add(_zoomOffset);
+      _targetCamPos.y = Math.max(_targetCamPos.y, 0.42);
 
-      this.controls.target.x = THREE.MathUtils.damp(this.controls.target.x, _targetLookAt.x, 2.4, dt);
-      this.controls.target.y = THREE.MathUtils.damp(this.controls.target.y, _targetLookAt.y, 2.4, dt);
-      this.controls.target.z = THREE.MathUtils.damp(this.controls.target.z, _targetLookAt.z, 2.4, dt);
+      this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _targetCamPos.x, 3.0, dt);
+      this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _targetCamPos.y, 3.0, dt);
+      this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _targetCamPos.z, 3.0, dt);
+
+      this.controls.target.x = THREE.MathUtils.damp(this.controls.target.x, _targetLookAt.x, 2.8, dt);
+      this.controls.target.y = THREE.MathUtils.damp(this.controls.target.y, _targetLookAt.y, 2.8, dt);
+      this.controls.target.z = THREE.MathUtils.damp(this.controls.target.z, _targetLookAt.z, 2.8, dt);
+      this.camera.lookAt(this.controls.target);
     } else if (this.activeCameraTransition) {
       const preset = CAMERA_PRESETS[this.activePreset];
       const scale =
@@ -1347,7 +1466,9 @@ export class TurntableScene {
       elapsed * 0.025 + (levels?.pulse ?? 0) * 0.015 * this.particlePlayingMix;
     this.envController.update(elapsed);
 
-    this.controls.update();
+    if (!this.cinematicActive) {
+      this.controls.update();
+    }
     this.renderer.render(this.scene, this.camera);
 
     if (this.isSoftwareGl) {
@@ -1363,9 +1484,11 @@ export class TurntableScene {
     window.clearTimeout(this.frameId);
 
     const dom = this.renderer.domElement;
+    dom.removeEventListener('wheel', this.handleWheel, { capture: true });
     dom.removeEventListener('pointerdown', this.handlePointerDown);
     dom.removeEventListener('pointermove', this.handlePointerMove);
     dom.removeEventListener('pointerup', this.handlePointerUp);
+    dom.removeEventListener('pointercancel', this.handlePointerCancel);
     dom.removeEventListener('webglcontextlost', this.handleContextLost);
     dom.removeEventListener('webglcontextrestored', this.handleContextRestored);
     window.removeEventListener('resize', this.handleResize);
