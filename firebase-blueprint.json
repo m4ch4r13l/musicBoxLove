@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "GiftTurntable": {
+      "title": "GiftTurntable",
+      "description": "A personalized 3D vinyl turntable gift configuration belonging to a creator and shareable via a unique gift ID.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the creator who owns this gift.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientLabel": {
+          "type": "string",
+          "description": "Internal label to identify the client or recipient in the creator library.",
+          "maxLength": 120
+        },
+        "eyebrow": {
+          "type": "string",
+          "description": "Short eyebrow header shown at the top of the turntable view.",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "description": "Main gift title.",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "subtitle": {
+          "type": "string",
+          "description": "Subtitle or brief instruction displayed under the title.",
+          "maxLength": 300
+        },
+        "signature": {
+          "type": "string",
+          "description": "Creator signature shown at the bottom of the dedication modal.",
+          "maxLength": 120
+        },
+        "finish": {
+          "type": "string",
+          "description": "Wood plinth finish preset.",
+          "enum": ["walnut", "ebony", "oak"]
+        },
+        "environment": {
+          "type": "string",
+          "description": "3D surrounding environment preset.",
+          "enum": ["valley", "forest", "ocean", "space", "studio"]
+        },
+        "discs": {
+          "type": "array",
+          "description": "Ordered list of 1 to 12 vinyl discs included in the gift."
+        },
+        "isPublished": {
+          "type": "boolean",
+          "description": "Whether the gift link is active for recipients to view via direct ID."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the gift document was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last update."
+        }
+      },
+      "required": [
+        "ownerId",
+        "eyebrow",
+        "title",
+        "subtitle",
+        "signature",
+        "finish",
+        "environment",
+        "discs",
+        "isPublished",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/gifts/{giftId}": {
+      "schema": {
+        "$ref": "#/entities/GiftTurntable"
+      },
+      "description": "Stores each client/recipient turntable gift configuration keyed by its shareable gift ID."
+    }
+  }
+}

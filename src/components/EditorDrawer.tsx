@@ -1,16 +1,25 @@
 import { useRef, useState } from 'react';
+import type { User } from 'firebase/auth';
 import {
   ArrowDown,
   ArrowUp,
+  Cloud,
+  CloudUpload,
+  Copy,
   Download,
   Eye,
+  FolderOpen,
   Link2,
+  LogIn,
+  LogOut,
   Plus,
   RotateCcw,
+  Save,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
+import type { CloudGiftRecord } from '../services/giftCloudService';
 import type {
   PlinthFinish,
   SceneEnvironment,
@@ -29,6 +38,14 @@ interface EditorDrawerProps {
   open: boolean;
   config: TurntableConfig;
   currentDiscIndex: number;
+  user: User | null;
+  authReady: boolean;
+  activeGiftId: string;
+  clientLabel: string;
+  isPublished: boolean;
+  cloudGifts: CloudGiftRecord[];
+  cloudSaving: boolean;
+  uploadState: { discIndex: number; kind: 'audio' | 'cover'; progress: number } | null;
   onClose: () => void;
   onUpdateConfig: (next: TurntableConfig) => void;
   onSelectDisc: (index: number) => void;
@@ -37,12 +54,31 @@ interface EditorDrawerProps {
   onExportJson: () => void;
   onImportJson: (file: File) => void;
   onResetDefaults: () => void;
+  onChangeGiftId: (val: string) => void;
+  onChangeClientLabel: (val: string) => void;
+  onTogglePublished: (val: boolean) => void;
+  onSignIn: () => void;
+  onSignOut: () => void;
+  onSaveCloudGift: () => void;
+  onNewCloudGift: () => void;
+  onLoadCloudGift: (record: CloudGiftRecord) => void;
+  onCopyCloudGiftLink: (giftId: string) => void;
+  onDeleteCloudGift: (giftId: string) => void;
+  onUploadDiscMedia: (discIndex: number, kind: 'audio' | 'cover', file: File) => void;
 }
 
 export function EditorDrawer({
   open,
   config,
   currentDiscIndex,
+  user,
+  authReady,
+  activeGiftId,
+  clientLabel,
+  isPublished,
+  cloudGifts,
+  cloudSaving,
+  uploadState,
   onClose,
   onUpdateConfig,
   onSelectDisc,
@@ -51,8 +87,19 @@ export function EditorDrawer({
   onExportJson,
   onImportJson,
   onResetDefaults,
+  onChangeGiftId,
+  onChangeClientLabel,
+  onTogglePublished,
+  onSignIn,
+  onSignOut,
+  onSaveCloudGift,
+  onNewCloudGift,
+  onLoadCloudGift,
+  onCopyCloudGiftLink,
+  onDeleteCloudGift,
+  onUploadDiscMedia,
 }: EditorDrawerProps) {
-  const [activeTab, setActiveTab] = useState<'general' | 'discs'>('discs');
+  const [activeTab, setActiveTab] = useState<'general' | 'discs' | 'cloud'>('discs');
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
 
   const updateField = <K extends keyof TurntableConfig>(
@@ -74,6 +121,7 @@ export function EditorDrawer({
   };
 
   const addDisc = () => {
+    if (config.discs.length >= 12) return;
     const idx = config.discs.length;
     const newDisc: VinylDisc = {
       id: `disc-${Date.now()}`,
@@ -146,11 +194,11 @@ export function EditorDrawer({
 
       {/* Segmented Tabs */}
       <div className="px-5 pt-3">
-        <div className="grid grid-cols-2 gap-1 p-1 bg-[#1e1713] rounded-lg border border-[#ffe0bd]/10">
+        <div className="grid grid-cols-3 gap-1 p-1 bg-[#1e1713] rounded-lg border border-[#ffe0bd]/10">
           <button
             type="button"
             onClick={() => setActiveTab('discs')}
-            className={`py-2 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+            className={`py-2 text-[11px] font-medium rounded-md transition-colors cursor-pointer ${
               activeTab === 'discs'
                 ? 'bg-[#2e231c] text-[#f7efe6]'
                 : 'text-[#b8a898] hover:text-[#f7efe6]'
@@ -161,13 +209,25 @@ export function EditorDrawer({
           <button
             type="button"
             onClick={() => setActiveTab('general')}
-            className={`py-2 text-xs font-medium rounded-md transition-colors cursor-pointer ${
+            className={`py-2 text-[11px] font-medium rounded-md transition-colors cursor-pointer ${
               activeTab === 'general'
                 ? 'bg-[#2e231c] text-[#f7efe6]'
                 : 'text-[#b8a898] hover:text-[#f7efe6]'
             }`}
           >
-            Escenario y Diseño
+            Escenario
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('cloud')}
+            className={`py-2 text-[11px] font-medium rounded-md transition-colors cursor-pointer inline-flex items-center justify-center gap-1 ${
+              activeTab === 'cloud'
+                ? 'bg-[#2e231c] text-[#f7efe6]'
+                : 'text-[#b8a898] hover:text-[#f7efe6]'
+            }`}
+          >
+            <Cloud className="w-3 h-3 text-[#e89f65]" />
+            <span>Nube ({cloudGifts.length})</span>
           </button>
         </div>
       </div>
@@ -182,6 +242,7 @@ export function EditorDrawer({
               </label>
               <input
                 type="text"
+                maxLength={120}
                 value={config.eyebrow}
                 onChange={(e) => updateField('eyebrow', e.target.value)}
                 className="bg-[#221a15] border border-[#ffe0bd]/12 rounded-lg px-3 py-2 text-sm text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
@@ -194,6 +255,7 @@ export function EditorDrawer({
               </label>
               <input
                 type="text"
+                maxLength={160}
                 value={config.title}
                 onChange={(e) => updateField('title', e.target.value)}
                 className="bg-[#221a15] border border-[#ffe0bd]/12 rounded-lg px-3 py-2 text-sm text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
@@ -206,6 +268,7 @@ export function EditorDrawer({
               </label>
               <textarea
                 rows={2}
+                maxLength={300}
                 value={config.subtitle}
                 onChange={(e) => updateField('subtitle', e.target.value)}
                 className="bg-[#221a15] border border-[#ffe0bd]/12 rounded-lg px-3 py-2 text-sm text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text resize-y"
@@ -218,6 +281,7 @@ export function EditorDrawer({
               </label>
               <input
                 type="text"
+                maxLength={120}
                 value={config.signature}
                 onChange={(e) => updateField('signature', e.target.value)}
                 className="bg-[#221a15] border border-[#ffe0bd]/12 rounded-lg px-3 py-2 text-sm text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
@@ -404,6 +468,7 @@ export function EditorDrawer({
                       </label>
                       <input
                         type="text"
+                        maxLength={120}
                         value={disc.title}
                         onFocus={() => onSelectDisc(idx)}
                         onChange={(e) => updateDisc(idx, 'title', e.target.value)}
@@ -416,6 +481,7 @@ export function EditorDrawer({
                         <label className="text-[11px] text-[#b8a898]">Artista</label>
                         <input
                           type="text"
+                          maxLength={120}
                           value={disc.artist}
                           onChange={(e) => updateDisc(idx, 'artist', e.target.value)}
                           className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
@@ -425,6 +491,7 @@ export function EditorDrawer({
                         <label className="text-[11px] text-[#b8a898]">Fecha / Etiqueta</label>
                         <input
                           type="text"
+                          maxLength={80}
                           value={disc.date}
                           onChange={(e) => updateDisc(idx, 'date', e.target.value)}
                           className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
@@ -492,50 +559,120 @@ export function EditorDrawer({
                       </select>
                     </div>
 
-                    {/* Audio MP3 URL + Local test */}
+                    {/* Audio MP3 URL + Firebase upload + Local test */}
                     <div className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <label className="text-[11px] text-[#b8a898]">
-                          URL de audio MP3 (opcional)
+                          Audio MP3
                         </label>
-                        <label className="text-[10px] text-[#e89f65] hover:underline cursor-pointer">
-                          Probar archivo local
+                        <div className="flex items-center gap-2.5">
+                          <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
+                            <CloudUpload className="w-3 h-3" />
+                            <span>Subir a Firebase</span>
+                            <input
+                              type="file"
+                              accept="audio/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  if (!user) {
+                                    setActiveTab('cloud');
+                                  }
+                                  onUploadDiscMedia(idx, 'audio', file);
+                                }
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                          <label className="text-[10px] text-[#b8a898] hover:text-[#f7efe6] hover:underline cursor-pointer">
+                            Probar local
+                            <input
+                              type="file"
+                              accept="audio/*"
+                              className="hidden"
+                              onChange={(e) =>
+                                handleLocalAudioFile(idx, e.target.files?.[0])
+                              }
+                            />
+                          </label>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={1024}
+                        placeholder="https://.../cancion.mp3 o sube un archivo"
+                        value={disc.audioUrl.startsWith('blob:') ? '' : disc.audioUrl}
+                        onChange={(e) => updateDisc(idx, 'audioUrl', e.target.value)}
+                        className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
+                      />
+                      {uploadState?.discIndex === idx && uploadState.kind === 'audio' && (
+                        <div className="space-y-1">
+                          <div className="w-full h-1.5 rounded-full bg-[#2a211b] overflow-hidden">
+                            <div
+                              className="h-full bg-[#e89f65] transition-all"
+                              style={{ width: `${uploadState.progress}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-[#e89f65]">
+                            Subiendo audio a Firebase... {uploadState.progress}%
+                          </span>
+                        </div>
+                      )}
+                      {disc.audioUrl.startsWith('blob:') && (
+                        <span className="text-[10px] text-[#b8a898]">
+                          Audio local solo para esta sesión. Usa “Subir a Firebase” o una URL pública para compartir.
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Cover URL + Firebase upload */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-[11px] text-[#b8a898]">
+                          Foto de portada (opcional)
+                        </label>
+                        <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
+                          <CloudUpload className="w-3 h-3" />
+                          <span>Subir foto</span>
                           <input
                             type="file"
-                            accept="audio/*"
+                            accept="image/*"
                             className="hidden"
-                            onChange={(e) =>
-                              handleLocalAudioFile(idx, e.target.files?.[0])
-                            }
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                if (!user) {
+                                  setActiveTab('cloud');
+                                }
+                                onUploadDiscMedia(idx, 'cover', file);
+                              }
+                              e.target.value = '';
+                            }}
                           />
                         </label>
                       </div>
                       <input
                         type="text"
-                        placeholder="https://.../cancion.mp3 o ./assets/..."
-                        value={disc.audioUrl.startsWith('blob:') ? '' : disc.audioUrl}
-                        onChange={(e) => updateDisc(idx, 'audioUrl', e.target.value)}
-                        className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
-                      />
-                      {disc.audioUrl.startsWith('blob:') && (
-                        <span className="text-[10px] text-[#b8a898]">
-                          Audio local cargado solo para escucha en esta sesión. Para compartir usa un enlace MP3 público.
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Cover URL */}
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[11px] text-[#b8a898]">
-                        URL de foto de portada (opcional)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="https://.../foto.jpg"
+                        maxLength={1024}
+                        placeholder="https://.../foto.jpg o sube una imagen"
                         value={disc.coverUrl}
                         onChange={(e) => updateDisc(idx, 'coverUrl', e.target.value)}
                         className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
                       />
+                      {uploadState?.discIndex === idx && uploadState.kind === 'cover' && (
+                        <div className="space-y-1">
+                          <div className="w-full h-1.5 rounded-full bg-[#2a211b] overflow-hidden">
+                            <div
+                              className="h-full bg-[#e89f65] transition-all"
+                              style={{ width: `${uploadState.progress}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-[#e89f65]">
+                            Subiendo portada a Firebase... {uploadState.progress}%
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Note */}
@@ -545,6 +682,7 @@ export function EditorDrawer({
                       </label>
                       <textarea
                         rows={3}
+                        maxLength={2000}
                         value={disc.note}
                         onChange={(e) => updateDisc(idx, 'note', e.target.value)}
                         className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text resize-y"
@@ -558,11 +696,204 @@ export function EditorDrawer({
             <button
               type="button"
               onClick={addDisc}
-              className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-[#e89f65]/45 text-xs font-medium text-[#e89f65] hover:bg-[#e89f65]/10 transition-colors cursor-pointer"
+              disabled={config.discs.length >= 12}
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl border border-dashed border-[#e89f65]/45 text-xs font-medium text-[#e89f65] hover:bg-[#e89f65]/10 disabled:opacity-40 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              Añadir nuevo vinilo
+              {config.discs.length >= 12 ? 'Límite de 12 vinilos alcanzado' : 'Añadir nuevo vinilo'}
             </button>
+          </div>
+        )}
+
+        {activeTab === 'cloud' && (
+          <div className="space-y-4">
+            {!authReady ? (
+              <div className="rounded-xl p-4 bg-[#1c1512] border border-[#ffe0bd]/10 text-xs text-[#b8a898]">
+                Conectando con Firebase...
+              </div>
+            ) : !user ? (
+              <div className="rounded-xl p-4 bg-[#1c1512] border border-[#ffe0bd]/12 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <Cloud className="w-5 h-5 text-[#e89f65] shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#f7efe6]">
+                      Guarda regalos y archivos de clientes en Firebase
+                    </h3>
+                    <p className="text-xs text-[#b8a898] mt-1 leading-relaxed">
+                      Inicia sesión con Google para guardar cada tocadiscos por cliente, subir sus MP3/portadas sin tocar el repositorio y compartir enlaces cortos (<code className="text-[#e89f65]">?gift=...</code>).
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#e89f65] hover:bg-[#f2b07b] text-[#1c120c] text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Iniciar sesión con Google
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Signed-in user bar */}
+                <div className="rounded-xl p-3 bg-[#1c1512] border border-[#ffe0bd]/12 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-[#f7efe6] truncate">
+                      {user.displayName || 'Creador conectado'}
+                    </div>
+                    <div className="text-[11px] text-[#b8a898] truncate">
+                      {user.email}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[11px] text-[#b8a898] hover:text-[#f7efe6] cursor-pointer shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    Salir
+                  </button>
+                </div>
+
+                {/* Save current gift to Firestore */}
+                <div className="rounded-xl p-3.5 bg-[#221a15] border border-[#e89f65]/30 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[#f7efe6]">
+                      Regalo activo en Firebase
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onNewCloudGift}
+                      className="text-[11px] text-[#e89f65] hover:underline cursor-pointer"
+                    >
+                      + Nuevo cliente
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-[#b8a898]">
+                      Nombre del cliente (referencia interna)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      placeholder="Ej. Regalo para Ana y Luis"
+                      value={clientLabel}
+                      onChange={(e) => onChangeClientLabel(e.target.value)}
+                      className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-[#b8a898]">
+                      ID corto del enlace (?gift=...)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={64}
+                      placeholder="Se genera automático o escribe ej. ana-y-luis"
+                      value={activeGiftId}
+                      onChange={(e) => onChangeGiftId(e.target.value)}
+                      className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-[#f7efe6] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isPublished}
+                      onChange={(e) => onTogglePublished(e.target.checked)}
+                      className="accent-[#e89f65] w-3.5 h-3.5 cursor-pointer"
+                    />
+                    <span>Enlace público activo (el cliente puede abrirlo)</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={onSaveCloudGift}
+                    disabled={cloudSaving}
+                    className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#e89f65] hover:bg-[#f2b07b] disabled:opacity-50 text-[#1c120c] text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {cloudSaving ? 'Guardando en Firebase...' : 'Guardar en Firebase'}
+                  </button>
+                </div>
+
+                {/* Saved Client Gifts List */}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-medium text-[#b8a898]">
+                    Clientes guardados ({cloudGifts.length})
+                  </div>
+                  {cloudGifts.length === 0 ? (
+                    <p className="text-xs text-[#b8a898]/80 rounded-xl p-3 bg-[#1c1512] border border-[#ffe0bd]/10">
+                      Aún no has guardado regalos en Firebase. Edita tus vinilos y pulsa “Guardar en Firebase”.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {cloudGifts.map((rec) => {
+                        const isSelected = activeGiftId === rec.id;
+                        return (
+                          <div
+                            key={rec.id}
+                            className={`rounded-xl p-3 border transition-colors ${
+                              isSelected
+                                ? 'bg-[#281f19] border-[#e89f65]/60'
+                                : 'bg-[#1c1512] border-[#ffe0bd]/10'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-[#f7efe6] truncate">
+                                  {rec.clientLabel || rec.config.title}
+                                </div>
+                                <div className="text-[10px] text-[#b8a898] truncate mt-0.5">
+                                  ?gift={rec.id} · {rec.config.discs.length} disco(s)
+                                </div>
+                              </div>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                                  rec.isPublished
+                                    ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-500/30'
+                                    : 'bg-[#2a211b] text-[#b8a898]'
+                                }`}
+                              >
+                                {rec.isPublished ? 'Público' : 'Borrador'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-2.5">
+                              <button
+                                type="button"
+                                onClick={() => onLoadCloudGift(rec)}
+                                className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[11px] text-[#f7efe6] hover:border-[#e89f65]/60 cursor-pointer"
+                              >
+                                <FolderOpen className="w-3 h-3 text-[#e89f65]" />
+                                Abrir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onCopyCloudGiftLink(rec.id)}
+                                className="flex-1 inline-flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[11px] text-[#f7efe6] hover:border-[#e89f65]/60 cursor-pointer"
+                              >
+                                <Copy className="w-3 h-3 text-[#e89f65]" />
+                                Link
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteCloudGift(rec.id)}
+                                title="Eliminar regalo"
+                                className="p-1.5 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[#b8a898] hover:text-red-400 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

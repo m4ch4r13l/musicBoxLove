@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'machariel123@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidDiscMap(d) {
+      return d is map
+        && d.keys().hasAll(['id', 'title', 'artist', 'date', 'vinylColor', 'labelColor', 'coverUrl', 'audioUrl', 'synthPreset', 'note'])
+        && d.keys().hasOnly(['id', 'title', 'artist', 'date', 'vinylColor', 'labelColor', 'coverUrl', 'audioUrl', 'synthPreset', 'note'])
+        && d.id is string && d.id.size() >= 1 && d.id.size() <= 128
+        && d.title is string && d.title.size() <= 120
+        && d.artist is string && d.artist.size() <= 120
+        && d.date is string && d.date.size() <= 80
+        && d.vinylColor is string && d.vinylColor.size() <= 16
+        && d.labelColor is string && d.labelColor.size() <= 16
+        && d.coverUrl is string && d.coverUrl.size() <= 1024
+        && d.audioUrl is string && d.audioUrl.size() <= 1024
+        && d.synthPreset is int && d.synthPreset >= 0 && d.synthPreset <= 10
+        && d.note is string && d.note.size() <= 2000;
+    }
+
+    function isValidGift(data) {
+      return data is map
+        && data.keys().hasAll(['ownerId', 'eyebrow', 'title', 'subtitle', 'signature', 'finish', 'environment', 'discs', 'isPublished', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'clientLabel', 'eyebrow', 'title', 'subtitle', 'signature', 'finish', 'environment', 'discs', 'isPublished', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && (!('clientLabel' in data) || (data.clientLabel is string && data.clientLabel.size() <= 120))
+        && data.eyebrow is string && data.eyebrow.size() <= 120
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.subtitle is string && data.subtitle.size() <= 300
+        && data.signature is string && data.signature.size() <= 120
+        && data.finish is string && data.finish.size() <= 16 && data.finish in ['walnut', 'ebony', 'oak']
+        && data.environment is string && data.environment.size() <= 16 && data.environment in ['valley', 'forest', 'ocean', 'space', 'studio']
+        && data.isPublished is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.discs is list && data.discs.size() >= 1 && data.discs.size() <= 12
+        && isValidDiscMap(data.discs[0]);
+    }
+
+    match /admins/{userId} {
+      allow read, write: if false;
+    }
+
+    match /gifts/{giftId} {
+      // Single-document lookup by shareable giftId (no blanket reads)
+      allow get: if isValidId(giftId) && (
+        existing().isPublished == true ||
+        (isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin()))
+      );
+
+      // Owners may list only their own gifts (no get()/exists() calls inside list)
+      allow list: if isVerifiedUser() && (
+        existing().ownerId == request.auth.uid ||
+        request.auth.token.email == 'machariel123@gmail.com'
+      );
+
+      allow create: if isValidId(giftId)
+        && isVerifiedUser()
+        && isValidGift(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(giftId)
+        && isVerifiedUser()
+        && isValidGift(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'clientLabel',
+              'eyebrow',
+              'title',
+              'subtitle',
+              'signature',
+              'finish',
+              'environment',
+              'discs',
+              'isPublished',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(giftId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+  }
+}

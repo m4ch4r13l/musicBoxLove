@@ -165,10 +165,20 @@ export function decodeConfigFromBase64(base64Str: string): TurntableConfig {
 export function loadInitialAppState(): {
   config: TurntableConfig;
   isGiftMode: boolean;
+  cloudGiftId: string | null;
 } {
   const urlParams = new URLSearchParams(window.location.search);
+  const cloudGiftId = urlParams.get('gift')?.trim() || null;
   const encoded = urlParams.get('d');
   const forceEdit = urlParams.get('edit') === 'true';
+
+  if (cloudGiftId) {
+    return {
+      config: structuredClone(DEFAULT_CONFIG),
+      isGiftMode: !forceEdit,
+      cloudGiftId,
+    };
+  }
 
   if (encoded) {
     try {
@@ -176,6 +186,7 @@ export function loadInitialAppState(): {
       return {
         config: parsed,
         isGiftMode: !forceEdit,
+        cloudGiftId: null,
       };
     } catch {
       // Fallback to draft or default if link is malformed
@@ -188,6 +199,7 @@ export function loadInitialAppState(): {
       return {
         config: normalizeConfig(JSON.parse(saved) as Partial<TurntableConfig>),
         isGiftMode: false,
+        cloudGiftId: null,
       };
     }
   } catch {
@@ -197,6 +209,7 @@ export function loadInitialAppState(): {
   return {
     config: structuredClone(DEFAULT_CONFIG),
     isGiftMode: false,
+    cloudGiftId: null,
   };
 }
 

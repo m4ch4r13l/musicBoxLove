@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 import { VinylAudioEngine } from './audio/vinylAudioEngine';
 import { BottomDock } from './components/BottomDock';
 import { DedicationModal } from './components/DedicationModal';
 import { EditorDrawer } from './components/EditorDrawer';
 import { TopBar } from './components/TopBar';
 import { TurntableCanvas, type TurntableCanvasHandle } from './components/TurntableCanvas';
+import { auth } from './firebase';
+import {
+  deleteCloudGift,
+  loadGiftById,
+  sanitizeGiftId,
+  saveCloudGift,
+  signInWithGoogle,
+  signOutUser,
+  subscribeMyGifts,
+  uploadClientMedia,
+  type CloudGiftRecord,
+} from './services/giftCloudService';
 import type {
   AudioPlaybackStatus,
   CameraPreset,
@@ -25,6 +38,20 @@ export default function App() {
   const [config, setConfig] = useState<TurntableConfig>(initialState.config);
   const [isGiftMode] = useState<boolean>(initialState.isGiftMode);
   const [isPreviewingGift, setIsPreviewingGift] = useState(false);
+
+  // Firebase Auth & Cloud Gift State
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [activeGiftId, setActiveGiftId] = useState<string>(initialState.cloudGiftId ?? '');
+  const [clientLabel, setClientLabel] = useState<string>('');
+  const [isPublished, setIsPublished] = useState<boolean>(true);
+  const [cloudGifts, setCloudGifts] = useState<CloudGiftRecord[]>([]);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const [uploadState, setUploadState] = useState<{
+    discIndex: number;
+    kind: 'audio' | 'cover';
+    progress: number;
+  } | null>(null);
 
   const [currentDiscIndex, setCurrentDiscIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -87,10 +114,66 @@ export default function App() {
 
   // Persist creator drafts locally (except when viewing someone else's gift link)
   useEffect(() => {
-    if (!isGiftMode) {
+    if (!isGiftMode && !initialState.cloudGiftId) {
       saveDraftConfig(config);
     }
-  }, [config, isGiftMode]);
+  }, [config, isGiftMode, initialState.cloudGiftId]);
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser);
+      setAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to creator's saved client gifts ONLY when authenticated
+  useEffect(() => {
+    if (!authReady || !user) {
+      setCloudGifts([]);
+      return;
+    }
+    const unsubscribe = subscribeMyGifts(
+      user.uid,
+      (records) => setCloudGifts(records),
+      (err) => {
+        console.error(err);
+        showToast('No se pudieron cargar tus clientes de Firebase');
+      }
+    );
+    return () => unsubscribe();
+  }, [authReady, user, showToast]);
+
+  // Load shared gift from Firestore if ?gift=<id> is in URL
+  useEffect(() => {
+    const giftId = initialState.cloudGiftId;
+    if (!giftId) return;
+    let cancelled = false;
+
+    loadGiftById(giftId)
+      .then((record) => {
+        if (cancelled) return;
+        if (record) {
+          setConfig(record.config);
+          setActiveGiftId(record.id);
+          setClientLabel(record.clientLabel);
+          setIsPublished(record.isPublished);
+          setCurrentDiscIndex(0);
+        } else {
+          showToast('No se encontró este regalo o el enlace expiró');
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error(err);
+        showToast('No se pudo abrir el regalo (puede que aún esté en borrador)');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialState.cloudGiftId, showToast]);
 
   const safeDiscIndex = Math.min(currentDiscIndex, Math.max(0, config.discs.length - 1));
   const currentDisc = config.discs[safeDiscIndex] ?? DEFAULT_CONFIG.discs[0];
@@ -204,18 +287,167 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleTogglePlay, handlePrevDisc, handleNextDisc]);
 
+  const copyTextToClipboard = useCallback(
+    (url: string, successMsg: string) => {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard
+          .writeText(url)
+          .then(() => showToast(successMsg))
+          .catch(() => showToast('No se pudo copiar automáticamente; copia la URL de la barra'));
+      } else {
+        showToast('No se pudo acceder al portapapeles');
+      }
+    },
+    [showToast]
+  );
+
+  const handleCopyCloudGiftLink = useCallback(
+    (giftId: string) => {
+      const url = `${window.location.origin}${window.location.pathname}?gift=${encodeURIComponent(giftId)}`;
+      copyTextToClipboard(url, `Enlace corto ?gift=${giftId} copiado`);
+    },
+    [copyTextToClipboard]
+  );
+
   const handleCopyGiftLink = useCallback(() => {
+    const savedInCloud = activeGiftId && cloudGifts.some((g) => g.id === activeGiftId);
+    if (savedInCloud) {
+      handleCopyCloudGiftLink(activeGiftId);
+      return;
+    }
     const encoded = encodeConfigToBase64(config);
     const url = `${window.location.origin}${window.location.pathname}?d=${encoded}`;
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      navigator.clipboard
-        .writeText(url)
-        .then(() => showToast('Enlace de regalo copiado al portapapeles'))
-        .catch(() => showToast('No se pudo copiar automáticamente; copia la URL de la barra'));
-    } else {
-      showToast('No se pudo acceder al portapapeles');
+    copyTextToClipboard(url, 'Enlace de regalo copiado al portapapeles');
+  }, [activeGiftId, cloudGifts, config, copyTextToClipboard, handleCopyCloudGiftLink]);
+
+  const handleSignIn = useCallback(async () => {
+    try {
+      await signInWithGoogle();
+      showToast('Sesión iniciada con Google');
+    } catch (err) {
+      console.error(err);
+      showToast('No se pudo iniciar sesión con Google');
     }
-  }, [config, showToast]);
+  }, [showToast]);
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      await signOutUser();
+      showToast('Sesión cerrada');
+    } catch {
+      showToast('No se pudo cerrar sesión');
+    }
+  }, [showToast]);
+
+  const handleSaveCloudGift = useCallback(async () => {
+    if (!user) {
+      showToast('Inicia sesión con Google para guardar en Firebase');
+      return;
+    }
+    setCloudSaving(true);
+    try {
+      const targetId = activeGiftId.trim() || sanitizeGiftId(clientLabel || config.title);
+      const savedId = await saveCloudGift({
+        giftId: targetId,
+        ownerId: user.uid,
+        clientLabel: clientLabel || config.title,
+        isPublished,
+        config,
+      });
+      setActiveGiftId(savedId);
+      showToast(`Cliente guardado en Firebase (?gift=${savedId})`);
+    } catch (err) {
+      console.error(err);
+      showToast('No se pudo guardar en Firebase. Revisa tus permisos o datos.');
+    } finally {
+      setCloudSaving(false);
+    }
+  }, [user, activeGiftId, clientLabel, config, isPublished, showToast]);
+
+  const handleNewCloudGift = useCallback(() => {
+    setActiveGiftId('');
+    setClientLabel('');
+    setIsPublished(true);
+    setConfig(structuredClone(DEFAULT_CONFIG));
+    setCurrentDiscIndex(0);
+    showToast('Nuevo borrador de cliente listo');
+  }, [showToast]);
+
+  const handleLoadCloudGift = useCallback(
+    (record: CloudGiftRecord) => {
+      setConfig(record.config);
+      setActiveGiftId(record.id);
+      setClientLabel(record.clientLabel);
+      setIsPublished(record.isPublished);
+      setCurrentDiscIndex(0);
+      showToast(`Regalo “${record.clientLabel || record.config.title}” cargado`);
+    },
+    [showToast]
+  );
+
+  const handleDeleteCloudGift = useCallback(
+    async (giftId: string) => {
+      try {
+        await deleteCloudGift(giftId);
+        if (activeGiftId === giftId) {
+          setActiveGiftId('');
+        }
+        showToast('Regalo eliminado de Firebase');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo eliminar el regalo');
+      }
+    },
+    [activeGiftId, showToast]
+  );
+
+  const handleUploadDiscMedia = useCallback(
+    async (discIndex: number, kind: 'audio' | 'cover', file: File) => {
+      if (!user) {
+        showToast('Inicia sesión con Google en “Nube” para subir archivos');
+        return;
+      }
+      const targetGift = activeGiftId.trim() || sanitizeGiftId(clientLabel || config.title);
+      if (!activeGiftId.trim()) {
+        setActiveGiftId(targetGift);
+      }
+
+      setUploadState({ discIndex, kind, progress: 0 });
+      try {
+        const downloadUrl = await uploadClientMedia({
+          ownerId: user.uid,
+          giftId: targetGift,
+          file,
+          kind,
+          onProgress: (progress) => setUploadState({ discIndex, kind, progress }),
+        });
+
+        setConfig((prev) => ({
+          ...prev,
+          discs: prev.discs.map((d, i) =>
+            i === discIndex
+              ? { ...d, [kind === 'audio' ? 'audioUrl' : 'coverUrl']: downloadUrl }
+              : d
+          ),
+        }));
+        showToast(
+          kind === 'audio'
+            ? 'MP3 subido a Firebase y vinculado al vinilo'
+            : 'Portada subida a Firebase y vinculada al vinilo'
+        );
+      } catch (err) {
+        console.error(err);
+        showToast(
+          err instanceof Error && err.message.includes('límite')
+            ? err.message
+            : 'Error al subir a Firebase Storage (revisa reglas/plan Blaze en tu consola)'
+        );
+      } finally {
+        setUploadState(null);
+      }
+    },
+    [user, activeGiftId, clientLabel, config.title, showToast]
+  );
 
   const handleExportJson = useCallback(() => {
     const blob = new Blob([JSON.stringify(config, null, 2)], {
@@ -251,6 +483,8 @@ export default function App() {
 
   const handleResetDefaults = useCallback(() => {
     clearDraftConfig();
+    setActiveGiftId('');
+    setClientLabel('');
     setConfig(structuredClone(DEFAULT_CONFIG));
     setCurrentDiscIndex(0);
     showToast('Se restauraron los discos de ejemplo');
@@ -366,6 +600,14 @@ export default function App() {
         open={editorOpen}
         config={config}
         currentDiscIndex={safeDiscIndex}
+        user={user}
+        authReady={authReady}
+        activeGiftId={activeGiftId}
+        clientLabel={clientLabel}
+        isPublished={isPublished}
+        cloudGifts={cloudGifts}
+        cloudSaving={cloudSaving}
+        uploadState={uploadState}
         onClose={() => setEditorOpen(false)}
         onUpdateConfig={setConfig}
         onSelectDisc={handleSelectDisc}
@@ -378,6 +620,17 @@ export default function App() {
         onExportJson={handleExportJson}
         onImportJson={handleImportJson}
         onResetDefaults={handleResetDefaults}
+        onChangeGiftId={setActiveGiftId}
+        onChangeClientLabel={setClientLabel}
+        onTogglePublished={setIsPublished}
+        onSignIn={handleSignIn}
+        onSignOut={handleSignOut}
+        onSaveCloudGift={handleSaveCloudGift}
+        onNewCloudGift={handleNewCloudGift}
+        onLoadCloudGift={handleLoadCloudGift}
+        onCopyCloudGiftLink={handleCopyCloudGiftLink}
+        onDeleteCloudGift={handleDeleteCloudGift}
+        onUploadDiscMedia={handleUploadDiscMedia}
       />
     </main>
   );
