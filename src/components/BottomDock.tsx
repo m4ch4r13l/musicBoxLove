@@ -53,6 +53,7 @@ const CAMERA_OPTIONS: { id: CameraPreset; label: string }[] = [
   { id: 'needle', label: 'Aguja' },
   { id: 'label', label: 'Etiqueta' },
   { id: 'top', label: 'Cenital' },
+  { id: 'cinematic', label: 'Cinemática' },
 ];
 
 function formatTime(sec: number): string {

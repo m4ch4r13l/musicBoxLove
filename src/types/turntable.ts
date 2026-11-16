@@ -2,7 +2,7 @@ export type PlinthFinish = 'walnut' | 'ebony' | 'oak';
 
 export type SceneEnvironment = 'valley' | 'forest' | 'ocean' | 'space' | 'studio';
 
-export type CameraPreset = 'overview' | 'needle' | 'label' | 'top';
+export type CameraPreset = 'overview' | 'needle' | 'label' | 'top' | 'cinematic';
 
 export type RpmMode = 33 | 45;
 

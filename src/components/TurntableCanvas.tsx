@@ -13,6 +13,8 @@ import type {
 export interface TurntableCanvasHandle {
   zoomIn: () => void;
   zoomOut: () => void;
+  triggerRestartCue: () => boolean;
+  isReady: () => boolean;
 }
 
 interface TurntableCanvasProps {
@@ -28,6 +30,8 @@ interface TurntableCanvasProps {
   getAudioLevels?: () => AudioReactiveLevels;
   onTogglePlay: () => void;
   onToggleRpm: () => void;
+  onCueReady?: () => void;
+  onRestartLift?: () => void;
 }
 
 export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvasProps>(
@@ -45,6 +49,8 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
       getAudioLevels,
       onTogglePlay,
       onToggleRpm,
+      onCueReady,
+      onRestartLift,
     },
     ref
   ) {
@@ -56,15 +62,25 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
       () => ({
         zoomIn: () => sceneRef.current?.zoomBy(0.74),
         zoomOut: () => sceneRef.current?.zoomBy(1.36),
+        triggerRestartCue: () => {
+          if (!sceneRef.current) return false;
+          sceneRef.current.triggerRestartCue();
+          return true;
+        },
+        isReady: () => Boolean(sceneRef.current),
       }),
       []
     );
 
   const onTogglePlayRef = useRef(onTogglePlay);
   const onToggleRpmRef = useRef(onToggleRpm);
+  const onCueReadyRef = useRef(onCueReady);
+  const onRestartLiftRef = useRef(onRestartLift);
   const getAudioLevelsRef = useRef(getAudioLevels);
   onTogglePlayRef.current = onTogglePlay;
   onToggleRpmRef.current = onToggleRpm;
+  onCueReadyRef.current = onCueReady;
+  onRestartLiftRef.current = onRestartLift;
   getAudioLevelsRef.current = getAudioLevels;
 
   const [webglError, setWebglError] = useState(false);
@@ -77,6 +93,8 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
       const controller = new TurntableScene(container, {
         onTogglePlay: () => onTogglePlayRef.current(),
         onToggleRpm: () => onToggleRpmRef.current(),
+        onCueReady: () => onCueReadyRef.current?.(),
+        onRestartLift: () => onRestartLiftRef.current?.(),
         getAudioLevels: () =>
           getAudioLevelsRef.current?.() ?? {
             bass: 0,

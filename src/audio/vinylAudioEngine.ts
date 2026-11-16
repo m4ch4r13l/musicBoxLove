@@ -104,12 +104,17 @@ export class VinylAudioEngine {
   private loadedUrlMap = new WeakMap<HTMLAudioElement, string>();
 
   private isPlaying = false;
+  private waitingForCue = false;
+  private inLeadIn = false;
+  private leadInTimer: number | null = null;
+  private leadInToken = 0;
   private volume = 0.72;
   private crackleEnabled = true;
   private rpm: RpmMode = 33;
   private currentDisc: VinylDisc | null = null;
   private fallbackActive = false;
   private step = 0;
+  private unlockedEls = new WeakSet<HTMLAudioElement>();
 
   // Beat / onset detection state (zero-allocation per frame)
   private avgBass = 0;
@@ -126,10 +131,15 @@ export class VinylAudioEngine {
   };
 
   private onStatusChange?: (status: AudioPlaybackStatus) => void;
+  private onTrackEnded?: () => void;
   private progressTimer: number | null = null;
 
-  constructor(onStatusChange?: (status: AudioPlaybackStatus) => void) {
+  constructor(
+    onStatusChange?: (status: AudioPlaybackStatus) => void,
+    onTrackEnded?: () => void
+  ) {
     this.onStatusChange = onStatusChange;
+    this.onTrackEnded = onTrackEnded;
     this.analyzedAudio = this.createAudioElement();
     this.plainAudio = this.createAudioElement();
     this.activeAudioEl = this.plainAudio;
@@ -140,9 +150,21 @@ export class VinylAudioEngine {
     el.preload = 'metadata';
 
     el.addEventListener('ended', () => {
-      if (el !== this.activeAudioEl) return;
+      if (el !== this.activeAudioEl || !this.isPlaying) return;
+      this.isPlaying = false;
+      this.stopSynth();
+      this.stopCrackle();
+      el.pause();
       el.currentTime = 0;
-      if (this.isPlaying) {
+      this.playNeedleLift();
+      this.emitStatus();
+
+      if (this.onTrackEnded) {
+        this.waitingForCue = true;
+        this.onTrackEnded();
+      } else {
+        this.isPlaying = true;
+        this.startCrackle();
         el.play().catch(() => {});
       }
     });
@@ -261,40 +283,55 @@ export class VinylAudioEngine {
     if (!this.masterGain) return;
     const now = ctx.currentTime;
 
-    // Soft low-end thump when stylus lands on vinyl
+    // Warm low-end cartridge thump when stylus lands on vinyl
     const thumpOsc = ctx.createOscillator();
     const thumpGain = ctx.createGain();
     thumpOsc.type = 'sine';
-    thumpOsc.frequency.setValueAtTime(115, now);
-    thumpOsc.frequency.exponentialRampToValueAtTime(36, now + 0.14);
+    thumpOsc.frequency.setValueAtTime(128, now);
+    thumpOsc.frequency.exponentialRampToValueAtTime(34, now + 0.18);
 
     thumpGain.gain.setValueAtTime(0.001, now);
-    thumpGain.gain.linearRampToValueAtTime(0.45, now + 0.012);
-    thumpGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.18);
+    thumpGain.gain.linearRampToValueAtTime(0.42, now + 0.014);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.22);
 
     thumpOsc.connect(thumpGain);
     thumpGain.connect(this.masterGain);
     thumpOsc.start(now);
-    thumpOsc.stop(now + 0.2);
+    thumpOsc.stop(now + 0.24);
 
-    // Subtle stylus micro-tick
-    const clickBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.03), ctx.sampleRate);
+    // Distinct stylus touchdown & lead-in groove rustle
+    const clickBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.065), ctx.sampleRate);
     const data = clickBuf.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.004));
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.011));
     }
     const clickSrc = ctx.createBufferSource();
     clickSrc.buffer = clickBuf;
     const clickFilter = ctx.createBiquadFilter();
     clickFilter.type = 'bandpass';
-    clickFilter.frequency.value = 2400;
+    clickFilter.frequency.value = 2100;
+    clickFilter.Q.value = 0.85;
     const clickGain = ctx.createGain();
-    clickGain.gain.value = 0.22;
+    clickGain.gain.value = 0.24;
 
     clickSrc.connect(clickFilter);
     clickFilter.connect(clickGain);
     clickGain.connect(this.masterGain);
-    clickSrc.start(now + 0.015);
+    clickSrc.start(now + 0.012);
+
+    // Subtle secondary micro-settle tick in the lead-in groove
+    const settleBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.025), ctx.sampleRate);
+    const settleData = settleBuf.getChannelData(0);
+    for (let i = 0; i < settleData.length; i++) {
+      settleData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.005));
+    }
+    const settleSrc = ctx.createBufferSource();
+    settleSrc.buffer = settleBuf;
+    const settleGain = ctx.createGain();
+    settleGain.gain.value = 0.42;
+    settleSrc.connect(settleGain);
+    settleGain.connect(clickFilter);
+    settleSrc.start(now + 0.075);
   }
 
   public playNeedleLift(): void {
@@ -307,7 +344,7 @@ export class VinylAudioEngine {
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(240, now);
     osc.frequency.exponentialRampToValueAtTime(520, now + 0.06);
-    gain.gain.setValueAtTime(0.14, now);
+    gain.gain.setValueAtTime(0.16, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
 
     osc.connect(gain);
@@ -316,7 +353,7 @@ export class VinylAudioEngine {
     osc.stop(now + 0.08);
   }
 
-  private startCrackle(): void {
+  private startCrackle(leadInBoost = false): void {
     const ctx = this.ensureContext();
     if (!this.masterGain || this.crackleSource) return;
 
@@ -325,31 +362,56 @@ export class VinylAudioEngine {
     const data = buffer.getChannelData(0);
 
     let lastOut = 0;
+    let popDecay = 0;
     for (let i = 0; i < bufferSize; i++) {
       const white = Math.random() * 2 - 1;
-      // Subtle brownian warmth hiss
-      lastOut = (lastOut + 0.04 * white) / 1.04;
-      const pop = Math.random() > 0.9988 ? (Math.random() * 0.55 - 0.275) : 0;
-      const microTick = Math.random() > 0.994 ? (Math.random() * 0.12 - 0.06) : 0;
-      data[i] = lastOut * 0.08 + pop + microTick;
+      // Warm vinyl groove rumble + subtle surface hiss
+      lastOut = (lastOut + 0.045 * white) / 1.045;
+      if (Math.random() > 0.9974) {
+        popDecay = (Math.random() * 2 - 1) * 0.44;
+      } else {
+        popDecay *= 0.86;
+      }
+      const microTick = Math.random() > 0.991 ? (Math.random() * 0.15 - 0.075) : 0;
+      data[i] = lastOut * 0.14 + white * 0.015 + popDecay + microTick;
     }
 
     this.crackleSource = ctx.createBufferSource();
     this.crackleSource.buffer = buffer;
     this.crackleSource.loop = true;
 
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 1950;
-    filter.Q.value = 0.65;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 95;
+
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 5800;
 
     this.crackleGain = ctx.createGain();
-    this.crackleGain.gain.value = this.crackleEnabled ? 0.34 : 0;
+    const initialGain = leadInBoost
+      ? this.crackleEnabled
+        ? 0.44
+        : 0.16
+      : this.crackleEnabled
+        ? 0.24
+        : 0;
+    this.crackleGain.gain.setValueAtTime(initialGain, ctx.currentTime);
 
-    this.crackleSource.connect(filter);
-    filter.connect(this.crackleGain);
+    this.crackleSource.connect(hp);
+    hp.connect(lp);
+    lp.connect(this.crackleGain);
     this.crackleGain.connect(this.masterGain);
     this.crackleSource.start();
+  }
+
+  private clearLeadIn(): void {
+    this.leadInToken++;
+    this.inLeadIn = false;
+    if (this.leadInTimer !== null) {
+      window.clearTimeout(this.leadInTimer);
+      this.leadInTimer = null;
+    }
   }
 
   private stopCrackle(): void {
@@ -443,7 +505,137 @@ export class VinylAudioEngine {
     }
   }
 
+  private configureAudioElement(disc: VinylDisc, resetToStart: boolean): HTMLAudioElement | null {
+    const audioUrl = disc.audioUrl?.trim();
+    if (!audioUrl) {
+      this.analyzedAudio.pause();
+      this.plainAudio.pause();
+      return null;
+    }
+
+    const useAnalyzed = this.canAnalyseUrl(audioUrl) && this.ensureMediaSource();
+    const targetEl = useAnalyzed ? this.analyzedAudio : this.plainAudio;
+    const otherEl = useAnalyzed ? this.plainAudio : this.analyzedAudio;
+    otherEl.pause();
+    this.activeAudioEl = targetEl;
+
+    const urlChanged = this.loadedUrlMap.get(targetEl) !== audioUrl;
+    if (urlChanged) {
+      this.loadedUrlMap.set(targetEl, audioUrl);
+      targetEl.src = audioUrl;
+    } else if (resetToStart && targetEl.readyState >= 1) {
+      targetEl.currentTime = 0;
+    }
+
+    targetEl.volume = targetEl === this.plainAudio ? this.volume : 1;
+    targetEl.playbackRate = this.rpm === 45 ? 1.18 : 1.0;
+    return targetEl;
+  }
+
+  public prepareCuePlay(disc: VinylDisc, resetToStart = false): void {
+    const wasPlaying = this.isPlaying;
+    this.clearLeadIn();
+    this.currentDisc = disc;
+    this.isPlaying = false;
+    this.waitingForCue = true;
+    this.fallbackActive = false;
+
+    this.ensureContext();
+    this.stopSynth();
+    this.stopCrackle();
+    this.analyzedAudio.pause();
+    this.plainAudio.pause();
+
+    if (wasPlaying && resetToStart) {
+      this.playNeedleLift();
+    }
+
+    const targetEl = this.configureAudioElement(disc, resetToStart);
+    if (targetEl && !this.unlockedEls.has(targetEl)) {
+      const savedTime = resetToStart ? 0 : targetEl.currentTime;
+      targetEl.muted = true;
+      targetEl
+        .play()
+        .then(() => {
+          this.unlockedEls.add(targetEl);
+          if (this.waitingForCue || this.inLeadIn) {
+            targetEl.pause();
+            targetEl.muted = false;
+            if (resetToStart) {
+              targetEl.currentTime = 0;
+            } else if (Math.abs(targetEl.currentTime - savedTime) > 0.15) {
+              targetEl.currentTime = savedTime;
+            }
+          } else {
+            targetEl.muted = false;
+          }
+        })
+        .catch(() => {
+          targetEl.muted = false;
+        });
+    }
+
+    this.emitStatus();
+  }
+
+  public commitCuePlayback(withNeedleSound = true): void {
+    if (!this.waitingForCue || !this.currentDisc) return;
+    this.waitingForCue = false;
+    this.clearLeadIn();
+
+    const disc = this.currentDisc;
+    const token = ++this.leadInToken;
+    this.isPlaying = true;
+    this.inLeadIn = true;
+    this.fallbackActive = false;
+
+    const ctx = this.ensureContext();
+    if (withNeedleSound) {
+      this.playNeedleDrop();
+    }
+    this.startCrackle(true);
+
+    // Solo vinyl lead-in groove crackle for ~1.25s before music enters
+    this.leadInTimer = window.setTimeout(() => {
+      if (!this.isPlaying || token !== this.leadInToken) return;
+      this.inLeadIn = false;
+      this.leadInTimer = null;
+
+      if (this.crackleGain) {
+        this.crackleGain.gain.setTargetAtTime(
+          this.crackleEnabled ? 0.24 : 0,
+          ctx.currentTime,
+          0.22
+        );
+      }
+
+      this.beginTrackAudio(disc);
+    }, 1250);
+  }
+
+  public pauseForCue(withNeedleSound = true): void {
+    const wasPlaying = this.isPlaying;
+    this.clearLeadIn();
+    if (wasPlaying && withNeedleSound) {
+      this.playNeedleLift();
+    }
+    this.isPlaying = false;
+    this.waitingForCue = true;
+    this.analyzedAudio.pause();
+    this.plainAudio.pause();
+    this.stopSynth();
+    this.stopCrackle();
+    this.emitStatus();
+  }
+
   public playDisc(disc: VinylDisc, withNeedleSound = true): void {
+    this.clearLeadIn();
+    this.currentDisc = disc;
+    this.waitingForCue = false;
+    this.startCurrentDiscNow(disc, withNeedleSound);
+  }
+
+  private startCurrentDiscNow(disc: VinylDisc, withNeedleSound: boolean): void {
     this.currentDisc = disc;
     this.isPlaying = true;
     this.fallbackActive = false;
@@ -452,53 +644,45 @@ export class VinylAudioEngine {
     if (withNeedleSound) {
       this.playNeedleDrop();
     }
-    this.startCrackle();
+    this.startCrackle(false);
+    this.beginTrackAudio(disc);
+  }
 
-    const audioUrl = disc.audioUrl?.trim();
-    if (audioUrl) {
+  private beginTrackAudio(disc: VinylDisc): void {
+    const targetEl = this.configureAudioElement(disc, false);
+    if (targetEl) {
       this.stopSynth();
-
-      const useAnalyzed = this.canAnalyseUrl(audioUrl) && this.ensureMediaSource();
-      const targetEl = useAnalyzed ? this.analyzedAudio : this.plainAudio;
-      const otherEl = useAnalyzed ? this.plainAudio : this.analyzedAudio;
-      otherEl.pause();
-      this.activeAudioEl = targetEl;
-
-      if (this.loadedUrlMap.get(targetEl) !== audioUrl) {
-        this.loadedUrlMap.set(targetEl, audioUrl);
-        targetEl.src = audioUrl;
-      }
-
-      if (targetEl === this.plainAudio) {
-        targetEl.volume = this.volume;
-      } else {
-        targetEl.volume = 1;
-      }
-      targetEl.playbackRate = this.rpm === 45 ? 1.18 : 1.0;
-
+      targetEl.muted = false;
       targetEl
         .play()
         .then(() => {
+          if (!this.isPlaying || this.inLeadIn) {
+            targetEl.pause();
+            return;
+          }
+          this.unlockedEls.add(targetEl);
           this.fallbackActive = false;
           this.emitStatus();
         })
         .catch(() => {
+          if (!this.isPlaying || this.inLeadIn) return;
           this.fallbackActive = true;
           this.startSynth(disc.synthPreset ?? 0);
           this.emitStatus();
         });
     } else {
-      this.analyzedAudio.pause();
-      this.plainAudio.pause();
       this.startSynth(disc.synthPreset ?? 0);
       this.emitStatus();
     }
   }
 
   public pause(withNeedleSound = true): void {
-    if (this.isPlaying && withNeedleSound) {
+    const wasPlaying = this.isPlaying;
+    this.clearLeadIn();
+    if (wasPlaying && withNeedleSound) {
       this.playNeedleLift();
     }
+    this.waitingForCue = false;
     this.isPlaying = false;
     this.analyzedAudio.pause();
     this.plainAudio.pause();
@@ -522,8 +706,8 @@ export class VinylAudioEngine {
 
   public setCrackleEnabled(enabled: boolean): void {
     this.crackleEnabled = enabled;
-    if (this.crackleGain && this.ctx) {
-      this.crackleGain.gain.setTargetAtTime(enabled ? 0.34 : 0, this.ctx.currentTime, 0.05);
+    if (this.crackleGain && this.ctx && !this.inLeadIn) {
+      this.crackleGain.gain.setTargetAtTime(enabled ? 0.24 : 0, this.ctx.currentTime, 0.05);
     }
   }
 
@@ -532,7 +716,7 @@ export class VinylAudioEngine {
     const rate = rpm === 45 ? 1.18 : 1.0;
     this.analyzedAudio.playbackRate = rate;
     this.plainAudio.playbackRate = rate;
-    if (this.isPlaying && this.currentDisc) {
+    if (this.isPlaying && !this.inLeadIn && this.currentDisc) {
       if (!this.currentDisc.audioUrl?.trim() || this.fallbackActive) {
         this.startSynth(this.currentDisc.synthPreset ?? 0);
       }
@@ -550,7 +734,7 @@ export class VinylAudioEngine {
   }
 
   public sampleReactiveLevels(): AudioReactiveLevels {
-    if (!this.isPlaying) {
+    if (!this.isPlaying || this.inLeadIn) {
       this.avgBass *= 0.9;
       this.smoothBass *= 0.86;
       this.smoothMid *= 0.86;

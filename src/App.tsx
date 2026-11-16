@@ -67,9 +67,17 @@ export default function App() {
 
   // Initialize audio engine once
   useEffect(() => {
-    const engine = new VinylAudioEngine((status) => {
-      setAudioStatus(status);
-    });
+    const engine = new VinylAudioEngine(
+      (status) => {
+        setAudioStatus(status);
+      },
+      () => {
+        const cued = canvasRef.current?.triggerRestartCue() ?? false;
+        if (!cued) {
+          audioEngineRef.current?.commitCuePlayback(true);
+        }
+      }
+    );
     audioEngineRef.current = engine;
     return () => {
       engine.dispose();
@@ -88,16 +96,17 @@ export default function App() {
   const currentDisc = config.discs[safeDiscIndex] ?? DEFAULT_CONFIG.discs[0];
 
   const handleTogglePlay = useCallback(() => {
-    setIsPlaying((prev) => {
-      const next = !prev;
-      if (next) {
-        audioEngineRef.current?.playDisc(currentDisc, true);
-      } else {
-        audioEngineRef.current?.pause(true);
+    const next = !isPlaying;
+    setIsPlaying(next);
+    if (next) {
+      audioEngineRef.current?.prepareCuePlay(currentDisc, false);
+      if (!canvasRef.current?.isReady()) {
+        audioEngineRef.current?.commitCuePlayback(true);
       }
-      return next;
-    });
-  }, [currentDisc]);
+    } else {
+      audioEngineRef.current?.pause(true);
+    }
+  }, [isPlaying, currentDisc]);
 
   const handleSelectDisc = useCallback(
     (index: number) => {
@@ -107,7 +116,12 @@ export default function App() {
       setCurrentDiscIndex(wrapped);
       const nextDisc = config.discs[wrapped];
       if (isPlaying && nextDisc) {
-        audioEngineRef.current?.playDisc(nextDisc, false);
+        prevAudioKeyRef.current = `${nextDisc.id}|${nextDisc.audioUrl}|${nextDisc.synthPreset}`;
+        audioEngineRef.current?.prepareCuePlay(nextDisc, true);
+        const cued = canvasRef.current?.triggerRestartCue() ?? false;
+        if (!cued) {
+          audioEngineRef.current?.commitCuePlayback(true);
+        }
       }
     },
     [config.discs, isPlaying]
@@ -154,7 +168,11 @@ export default function App() {
     if (prevAudioKeyRef.current !== currentDiscAudioKey) {
       prevAudioKeyRef.current = currentDiscAudioKey;
       if (isPlaying) {
-        audioEngineRef.current?.playDisc(currentDisc, false);
+        audioEngineRef.current?.prepareCuePlay(currentDisc, true);
+        const cued = canvasRef.current?.triggerRestartCue() ?? false;
+        if (!cued) {
+          audioEngineRef.current?.commitCuePlayback(true);
+        }
       }
     }
   }, [currentDiscAudioKey, currentDisc, isPlaying]);
@@ -269,6 +287,8 @@ export default function App() {
         }
         onTogglePlay={handleTogglePlay}
         onToggleRpm={handleToggleRpm}
+        onCueReady={() => audioEngineRef.current?.commitCuePlayback(true)}
+        onRestartLift={() => audioEngineRef.current?.pauseForCue(true)}
       />
 
       {/* Toast Notification */}

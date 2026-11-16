@@ -26,19 +26,42 @@ import {
 export interface TurntableSceneCallbacks {
   onTogglePlay: () => void;
   onToggleRpm: () => void;
+  onCueReady?: () => void;
+  onRestartLift?: () => void;
   getAudioLevels?: () => AudioReactiveLevels;
   onContextLost?: () => void;
   onContextRestored?: () => void;
 }
+
+const ARM_REST_YAW = 0.02;
+const ARM_REST_PITCH = -0.025;
+const ARM_LIFT_PITCH = -0.14;
+const ARM_PLAY_PITCH = 0.008;
+const ARM_OUTER_YAW = -0.38;
+const ARM_INNER_YAW = -0.76;
+
+type ArmPhase =
+  | 'parked'
+  | 'cue_lift'
+  | 'cue_swing'
+  | 'cue_drop'
+  | 'tracking'
+  | 'reposition_lift'
+  | 'reposition_swing'
+  | 'reposition_drop'
+  | 'park_lift'
+  | 'park_swing'
+  | 'park_drop';
 
 const CAMERA_PRESETS: Record<
   CameraPreset,
   { pos: [number, number, number]; target: [number, number, number] }
 > = {
   overview: { pos: [0.2, 6.2, 7.8], target: [0, 0.55, 0] },
-  needle: { pos: [2.45, 2.2, 2.85], target: [0.48, 0.98, 0.68] },
+  needle: { pos: [2.45, 2.2, 2.85], target: [0.55, 0.98, 0.72] },
   label: { pos: [-0.45, 3.6, 2.3], target: [-0.45, 0.88, 0.05] },
   top: { pos: [0, 9.2, 0.7], target: [0, 0.55, 0] },
+  cinematic: { pos: [-3.8, 4.6, 8.2], target: [0, 0.65, 0] },
 };
 
 function detectSoftwareWebGL(): boolean {
@@ -82,8 +105,11 @@ export class TurntableScene {
   private rpm: RpmMode = 33;
   private dustCoverOpen = true;
   private platterSpeed = 0;
-  private targetArmYaw = 0.02;
-  private targetArmPitch = -0.025;
+  private armPhase: ArmPhase = 'parked';
+  private cueToken = 0;
+  private pendingCueToken = 0;
+  private targetArmYaw = ARM_REST_YAW;
+  private targetArmPitch = ARM_REST_PITCH;
   private externalProgress = -1;
   private synthProgress = 0;
   private discLiftOffset = 0;
@@ -94,6 +120,8 @@ export class TurntableScene {
   private activeCameraTransition = false;
   private activePreset: CameraPreset = 'overview';
   private targetZoomDistance: number | null = null;
+  private cinematicActive = false;
+  private cinematicTime = 0;
 
   // Scene references for animation & updates
   private platterGroup: THREE.Group;
@@ -188,6 +216,7 @@ export class TurntableScene {
     this.controls.target.set(...CAMERA_PRESETS.overview.target);
     this.controls.addEventListener('start', () => {
       this.activeCameraTransition = false;
+      this.cinematicActive = false;
       this.targetZoomDistance = null;
     });
 
@@ -872,19 +901,32 @@ export class TurntableScene {
   }
 
   public setPlaying(playing: boolean): void {
+    if (this.isPlaying === playing) return;
     this.isPlaying = playing;
+
     if (playing) {
-      const p = this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
-      this.targetArmYaw = THREE.MathUtils.lerp(-0.46, -0.82, p);
-      this.targetArmPitch = 0.008;
       this.ledMat.emissiveIntensity = 2.6;
       this.strobeLightMat.emissiveIntensity = 2.4;
+      this.cueToken++;
+      this.pendingCueToken = this.cueToken;
+      this.armPhase = 'cue_lift';
     } else {
-      this.targetArmYaw = 0.02;
-      this.targetArmPitch = -0.025;
       this.ledMat.emissiveIntensity = 0.25;
       this.strobeLightMat.emissiveIntensity = 0.2;
+      this.pendingCueToken = 0;
+      if (this.armPhase !== 'parked') {
+        this.armPhase = 'park_lift';
+      }
     }
+  }
+
+  public triggerRestartCue(): void {
+    this.synthProgress = 0;
+    this.externalProgress = 0;
+    if (!this.isPlaying) return;
+    this.cueToken++;
+    this.pendingCueToken = this.cueToken;
+    this.armPhase = 'reposition_lift';
   }
 
   public setRpm(rpm: RpmMode): void {
@@ -925,12 +967,20 @@ export class TurntableScene {
 
   public setCameraPreset(preset: CameraPreset): void {
     this.activePreset = preset;
-    this.activeCameraTransition = true;
     this.targetZoomDistance = null;
+    if (preset === 'cinematic') {
+      this.cinematicActive = true;
+      this.cinematicTime = 0;
+      this.activeCameraTransition = false;
+    } else {
+      this.cinematicActive = false;
+      this.activeCameraTransition = true;
+    }
   }
 
   public zoomBy(multiplier: number): void {
     this.activeCameraTransition = false;
+    this.cinematicActive = false;
     const currentDist =
       this.targetZoomDistance ?? this.camera.position.distanceTo(this.controls.target);
     this.targetZoomDistance = THREE.MathUtils.clamp(
@@ -992,36 +1042,168 @@ export class TurntableScene {
     this.discGroup.position.y = this.discLiftOffset;
 
     // 3. Tonearm, cue lever & plinth tactile switches
-    if (this.isPlaying) {
-      if (this.externalProgress < 0) {
-        this.synthProgress = (this.synthProgress + dt / 90) % 1;
+    let targetCueZ = 0.52;
+    let yawDamp = 6.5;
+    let pitchDamp = 9.0;
+
+    switch (this.armPhase) {
+      case 'parked': {
+        this.targetArmYaw = ARM_REST_YAW;
+        this.targetArmPitch = ARM_REST_PITCH;
+        targetCueZ = 0.52;
+        break;
       }
-      const trackProgress =
-        this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
-      this.targetArmYaw = THREE.MathUtils.lerp(-0.46, -0.82, trackProgress);
+      case 'cue_lift': {
+        this.targetArmYaw = this.tonearmArm.rotation.y;
+        this.targetArmPitch = ARM_LIFT_PITCH;
+        targetCueZ = 0.52;
+        pitchDamp = 12.0;
+        if (this.tonearmArm.rotation.x <= ARM_LIFT_PITCH + 0.018) {
+          this.armPhase = 'cue_swing';
+        }
+        break;
+      }
+      case 'cue_swing': {
+        const trackProgress =
+          this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
+        this.targetArmYaw = THREE.MathUtils.lerp(ARM_OUTER_YAW, ARM_INNER_YAW, trackProgress);
+        this.targetArmPitch = ARM_LIFT_PITCH;
+        targetCueZ = 0.52;
+        yawDamp = 6.8;
+        if (Math.abs(this.tonearmArm.rotation.y - this.targetArmYaw) < 0.012) {
+          this.armPhase = 'cue_drop';
+        }
+        break;
+      }
+      case 'cue_drop': {
+        const trackProgress =
+          this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
+        this.targetArmYaw = THREE.MathUtils.lerp(ARM_OUTER_YAW, ARM_INNER_YAW, trackProgress);
+        this.targetArmPitch = ARM_PLAY_PITCH;
+        targetCueZ = 0.08;
+        pitchDamp = 9.0;
+        if (this.tonearmArm.rotation.x >= ARM_PLAY_PITCH - 0.006) {
+          this.tonearmArm.rotation.x = ARM_PLAY_PITCH;
+          this.armPhase = 'tracking';
+          if (this.pendingCueToken !== 0 && this.pendingCueToken === this.cueToken) {
+            this.pendingCueToken = 0;
+            this.callbacks.onCueReady?.();
+          }
+        }
+        break;
+      }
+      case 'tracking': {
+        if (this.externalProgress < 0) {
+          this.synthProgress += dt / 90;
+          if (this.synthProgress >= 1) {
+            this.synthProgress = 0;
+            this.cueToken++;
+            this.pendingCueToken = this.cueToken;
+            this.armPhase = 'reposition_lift';
+            this.callbacks.onRestartLift?.();
+            this.targetArmYaw = this.tonearmArm.rotation.y;
+            this.targetArmPitch = ARM_LIFT_PITCH;
+            targetCueZ = 0.52;
+            break;
+          }
+        }
+        const trackProgress =
+          this.externalProgress >= 0 ? this.externalProgress : this.synthProgress;
+        this.targetArmYaw = THREE.MathUtils.lerp(ARM_OUTER_YAW, ARM_INNER_YAW, trackProgress);
+        this.targetArmPitch = ARM_PLAY_PITCH;
+        targetCueZ = 0.08;
+        yawDamp = 5.5;
+        pitchDamp = 8.0;
+        break;
+      }
+      case 'reposition_lift': {
+        this.targetArmYaw = this.tonearmArm.rotation.y;
+        this.targetArmPitch = ARM_LIFT_PITCH;
+        targetCueZ = 0.52;
+        pitchDamp = 12.0;
+        if (this.tonearmArm.rotation.x <= ARM_LIFT_PITCH + 0.018) {
+          this.armPhase = 'reposition_swing';
+        }
+        break;
+      }
+      case 'reposition_swing': {
+        this.targetArmYaw = ARM_OUTER_YAW;
+        this.targetArmPitch = ARM_LIFT_PITCH;
+        targetCueZ = 0.52;
+        yawDamp = 6.8;
+        if (Math.abs(this.tonearmArm.rotation.y - ARM_OUTER_YAW) < 0.012) {
+          this.armPhase = 'reposition_drop';
+        }
+        break;
+      }
+      case 'reposition_drop': {
+        this.targetArmYaw = ARM_OUTER_YAW;
+        this.targetArmPitch = ARM_PLAY_PITCH;
+        targetCueZ = 0.08;
+        pitchDamp = 9.0;
+        if (this.tonearmArm.rotation.x >= ARM_PLAY_PITCH - 0.006) {
+          this.tonearmArm.rotation.x = ARM_PLAY_PITCH;
+          this.armPhase = 'tracking';
+          if (this.pendingCueToken !== 0 && this.pendingCueToken === this.cueToken) {
+            this.pendingCueToken = 0;
+            this.callbacks.onCueReady?.();
+          }
+        }
+        break;
+      }
+      case 'park_lift': {
+        this.targetArmYaw = this.tonearmArm.rotation.y;
+        this.targetArmPitch = ARM_LIFT_PITCH;
+        targetCueZ = 0.52;
+        pitchDamp = 12.0;
+        if (this.tonearmArm.rotation.x <= ARM_LIFT_PITCH + 0.018) {
+          this.armPhase = 'park_swing';
+        }
+        break;
+      }
+      case 'park_swing': {
+        this.targetArmYaw = ARM_REST_YAW;
+        this.targetArmPitch = ARM_LIFT_PITCH;
+        targetCueZ = 0.52;
+        yawDamp = 6.8;
+        if (Math.abs(this.tonearmArm.rotation.y - ARM_REST_YAW) < 0.014) {
+          this.armPhase = 'park_drop';
+        }
+        break;
+      }
+      case 'park_drop': {
+        this.targetArmYaw = ARM_REST_YAW;
+        this.targetArmPitch = ARM_REST_PITCH;
+        targetCueZ = 0.52;
+        pitchDamp = 9.0;
+        if (Math.abs(this.tonearmArm.rotation.x - ARM_REST_PITCH) < 0.004) {
+          this.tonearmArm.rotation.x = ARM_REST_PITCH;
+          this.armPhase = 'parked';
+        }
+        break;
+      }
     }
 
     this.tonearmArm.rotation.y = THREE.MathUtils.damp(
       this.tonearmArm.rotation.y,
       this.targetArmYaw,
-      5.5,
+      yawDamp,
       dt
     );
     this.tonearmArm.rotation.x = THREE.MathUtils.damp(
       this.tonearmArm.rotation.x,
       this.targetArmPitch,
-      6.5,
+      pitchDamp,
       dt
     );
-    if (this.isPlaying && this.platterSpeed > 1.6) {
+    if (this.armPhase === 'tracking' && this.platterSpeed > 1.6) {
       this.tonearmArm.rotation.y += Math.sin(elapsed * 2.6) * 0.0004;
     }
 
-    const targetCueZ = this.isPlaying ? 0.08 : 0.52;
     this.cueLeverMesh.rotation.z = THREE.MathUtils.damp(
       this.cueLeverMesh.rotation.z,
       targetCueZ,
-      8,
+      9,
       dt
     );
 
@@ -1050,8 +1232,66 @@ export class TurntableScene {
       dt
     );
 
-    // 5. Scripted camera preset damping (stops on arrival or user drag)
-    if (this.activeCameraTransition) {
+    // 5. Scripted camera preset & cinematic choreography (stops on arrival or user drag)
+    if (this.cinematicActive) {
+      this.cinematicTime += dt;
+      const scale = this.getPortraitDistanceScale(this.camera.aspect);
+      const cycle = this.cinematicTime % 32;
+
+      if (cycle < 9) {
+        // Shot 1: Sweeping wide arc across turntable and surrounding environment
+        const p = cycle / 9;
+        const angle = THREE.MathUtils.lerp(-0.45, 0.95, p);
+        const radius = (8.6 + Math.sin(p * Math.PI) * 1.4) * scale;
+        _targetCamPos.set(
+          Math.sin(angle) * radius,
+          (4.6 - Math.sin(p * Math.PI) * 1.3) * Math.min(scale, 2.0),
+          Math.cos(angle) * radius
+        );
+        _targetLookAt.set(0, 0.65, 0);
+      } else if (cycle < 17) {
+        // Shot 2: Intimate low-angle tracking along tonearm & stylus
+        const p = (cycle - 9) / 8;
+        const angle = THREE.MathUtils.lerp(0.65, 1.38, p);
+        const radius = 3.55 * Math.min(scale, 1.55);
+        _targetCamPos.set(
+          0.4 + Math.sin(angle) * radius,
+          1.75 + Math.sin(p * Math.PI) * 0.45,
+          0.5 + Math.cos(angle) * radius
+        );
+        _targetLookAt.set(0.45, 0.94, 0.55);
+      } else if (cycle < 25) {
+        // Shot 3: Elevated drift across spinning vinyl label & strobe platter
+        const p = (cycle - 17) / 8;
+        const angle = THREE.MathUtils.lerp(2.25, 3.65, p);
+        const radius = 4.2 * Math.min(scale, 1.65);
+        _targetCamPos.set(
+          -0.4 + Math.sin(angle) * radius,
+          3.4 + Math.cos(p * Math.PI) * 0.55,
+          0.1 + Math.cos(angle) * radius
+        );
+        _targetLookAt.set(-0.42, 0.88, 0.06);
+      } else {
+        // Shot 4: Hero pull-back framing turntable silhouette against the horizon
+        const p = (cycle - 25) / 7;
+        const angle = THREE.MathUtils.lerp(-0.95, -0.35, p);
+        const radius = THREE.MathUtils.lerp(7.2, 10.2, p) * scale;
+        _targetCamPos.set(
+          Math.sin(angle) * radius,
+          THREE.MathUtils.lerp(2.4, 5.4, p) * Math.min(scale, 2.0),
+          Math.cos(angle) * radius
+        );
+        _targetLookAt.set(0, 0.65, -0.2);
+      }
+
+      this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, _targetCamPos.x, 2.2, dt);
+      this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, _targetCamPos.y, 2.2, dt);
+      this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, _targetCamPos.z, 2.2, dt);
+
+      this.controls.target.x = THREE.MathUtils.damp(this.controls.target.x, _targetLookAt.x, 2.4, dt);
+      this.controls.target.y = THREE.MathUtils.damp(this.controls.target.y, _targetLookAt.y, 2.4, dt);
+      this.controls.target.z = THREE.MathUtils.damp(this.controls.target.z, _targetLookAt.z, 2.4, dt);
+    } else if (this.activeCameraTransition) {
       const preset = CAMERA_PRESETS[this.activePreset];
       const scale =
         this.activePreset === 'overview' || this.activePreset === 'top'
