@@ -68,6 +68,20 @@ service cloud.firestore {
         && isValidDiscMap(data.discs[0]);
     }
 
+    function isValidMediaAsset(data) {
+      return data is map
+        && data.keys().hasAll(['ownerId', 'kind', 'title', 'fileName', 'fileSize', 'url', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'kind', 'title', 'fileName', 'fileSize', 'url', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && data.kind is string && data.kind.size() <= 16 && data.kind in ['audio', 'cover']
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 160
+        && data.fileSize is int && data.fileSize >= 0 && data.fileSize <= 52428800
+        && data.url is string && data.url.size() >= 1 && data.url.size() <= 1024
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     match /admins/{userId} {
       allow read, write: if false;
     }
@@ -118,6 +132,48 @@ service cloud.firestore {
         );
 
       allow delete: if isValidId(giftId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /media_library/{mediaId} {
+      allow get: if isValidId(mediaId)
+        && isVerifiedUser()
+        && (existing().ownerId == request.auth.uid || isAdmin());
+
+      allow list: if isVerifiedUser() && (
+        existing().ownerId == request.auth.uid ||
+        request.auth.token.email == 'machariel123@gmail.com'
+      );
+
+      allow create: if isValidId(mediaId)
+        && isVerifiedUser()
+        && isValidMediaAsset(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(mediaId)
+        && isVerifiedUser()
+        && isValidMediaAsset(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title',
+              'fileName',
+              'fileSize',
+              'url',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(mediaId)
         && isVerifiedUser()
         && (existing().ownerId == request.auth.uid || isAdmin());
     }

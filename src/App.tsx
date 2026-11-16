@@ -8,15 +8,21 @@ import { TopBar } from './components/TopBar';
 import { TurntableCanvas, type TurntableCanvasHandle } from './components/TurntableCanvas';
 import { auth } from './firebase';
 import {
+  buildMergedMediaLibrary,
   deleteCloudGift,
+  deleteMediaLibraryItem,
+  findDuplicateMediaAsset,
   loadGiftById,
   sanitizeGiftId,
   saveCloudGift,
+  saveMediaLibraryItem,
   signInWithGoogle,
   signOutUser,
   subscribeMyGifts,
+  subscribeMyMediaLibrary,
   uploadClientMedia,
   type CloudGiftRecord,
+  type CloudMediaAsset,
 } from './services/giftCloudService';
 import type {
   AudioPlaybackStatus,
@@ -46,12 +52,18 @@ export default function App() {
   const [clientLabel, setClientLabel] = useState<string>('');
   const [isPublished, setIsPublished] = useState<boolean>(true);
   const [cloudGifts, setCloudGifts] = useState<CloudGiftRecord[]>([]);
+  const [libraryItems, setLibraryItems] = useState<CloudMediaAsset[]>([]);
   const [cloudSaving, setCloudSaving] = useState(false);
   const [uploadState, setUploadState] = useState<{
     discIndex: number;
     kind: 'audio' | 'cover';
     progress: number;
   } | null>(null);
+
+  const mediaLibrary = useMemo(
+    () => buildMergedMediaLibrary(libraryItems, cloudGifts),
+    [libraryItems, cloudGifts]
+  );
 
   const [currentDiscIndex, setCurrentDiscIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -144,6 +156,22 @@ export default function App() {
     );
     return () => unsubscribe();
   }, [authReady, user, showToast]);
+
+  // Subscribe to creator's reusable media library ONLY when authenticated
+  useEffect(() => {
+    if (!authReady || !user) {
+      setLibraryItems([]);
+      return;
+    }
+    const unsubscribe = subscribeMyMediaLibrary(
+      user.uid,
+      (items) => setLibraryItems(items),
+      (err) => {
+        console.error(err);
+      }
+    );
+    return () => unsubscribe();
+  }, [authReady, user]);
 
   // Load shared gift from Firestore if ?gift=<id> is in URL
   useEffect(() => {
@@ -401,12 +429,40 @@ export default function App() {
     [activeGiftId, showToast]
   );
 
+  const handleDeleteMediaAsset = useCallback(
+    async (mediaId: string) => {
+      try {
+        await deleteMediaLibraryItem(mediaId);
+        showToast('Elemento quitado de tu biblioteca');
+      } catch (err) {
+        console.error(err);
+        showToast('No se pudo quitar de la biblioteca');
+      }
+    },
+    [showToast]
+  );
+
   const handleUploadDiscMedia = useCallback(
     async (discIndex: number, kind: 'audio' | 'cover', file: File) => {
       if (!user) {
         showToast('Inicia sesión con Google en “Nube” para subir archivos');
         return;
       }
+
+      const duplicate = findDuplicateMediaAsset(mediaLibrary, kind, file);
+      if (duplicate) {
+        setConfig((prev) => ({
+          ...prev,
+          discs: prev.discs.map((d, i) =>
+            i === discIndex
+              ? { ...d, [kind === 'audio' ? 'audioUrl' : 'coverUrl']: duplicate.url }
+              : d
+          ),
+        }));
+        showToast('Archivo ya subido anteriormente: reutilizado sin duplicar en Cloudinary');
+        return;
+      }
+
       const targetGift = activeGiftId.trim() || sanitizeGiftId(clientLabel || config.title);
       if (!activeGiftId.trim()) {
         setActiveGiftId(targetGift);
@@ -422,6 +478,25 @@ export default function App() {
           onProgress: (progress) => setUploadState({ discIndex, kind, progress }),
         });
 
+        const currentTitle = config.discs[discIndex]?.title ?? '';
+        const friendlyTitle =
+          kind === 'audio' &&
+          currentTitle &&
+          !currentTitle.startsWith('Recuerdo #')
+            ? currentTitle
+            : file.name.replace(/\.[^.]+$/, '');
+
+        saveMediaLibraryItem({
+          ownerId: user.uid,
+          kind,
+          title: friendlyTitle,
+          fileName: file.name,
+          fileSize: file.size,
+          url: downloadUrl,
+        }).catch((err) => {
+          console.error('No se pudo registrar en biblioteca:', err);
+        });
+
         setConfig((prev) => ({
           ...prev,
           discs: prev.discs.map((d, i) =>
@@ -432,8 +507,8 @@ export default function App() {
         }));
         showToast(
           kind === 'audio'
-            ? 'MP3 subido a la nube y vinculado al vinilo'
-            : 'Portada subida a la nube y vinculada al vinilo'
+            ? 'MP3 subido y guardado en tu biblioteca reutilizable'
+            : 'Portada subida y guardada en tu biblioteca reutilizable'
         );
       } catch (err) {
         console.error(err);
@@ -446,7 +521,7 @@ export default function App() {
         setUploadState(null);
       }
     },
-    [user, activeGiftId, clientLabel, config.title, showToast]
+    [user, mediaLibrary, activeGiftId, clientLabel, config.title, config.discs, showToast]
   );
 
   const handleExportJson = useCallback(() => {
@@ -606,6 +681,7 @@ export default function App() {
         clientLabel={clientLabel}
         isPublished={isPublished}
         cloudGifts={cloudGifts}
+        mediaLibrary={mediaLibrary}
         cloudSaving={cloudSaving}
         uploadState={uploadState}
         onClose={() => setEditorOpen(false)}
@@ -630,6 +706,7 @@ export default function App() {
         onLoadCloudGift={handleLoadCloudGift}
         onCopyCloudGiftLink={handleCopyCloudGiftLink}
         onDeleteCloudGift={handleDeleteCloudGift}
+        onDeleteMediaAsset={handleDeleteMediaAsset}
         onUploadDiscMedia={handleUploadDiscMedia}
       />
     </main>

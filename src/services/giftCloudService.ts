@@ -27,6 +27,19 @@ export interface CloudGiftRecord {
   updatedAtMs: number;
 }
 
+export interface CloudMediaAsset {
+  id: string;
+  ownerId: string;
+  kind: 'audio' | 'cover';
+  title: string;
+  fileName: string;
+  fileSize: number;
+  url: string;
+  updatedAtMs: number;
+  source: 'library' | 'gift';
+  originLabel?: string;
+}
+
 const VALID_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 export function sanitizeGiftId(raw: string): string {
@@ -245,6 +258,167 @@ export async function deleteCloudGift(giftId: string): Promise<void> {
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
+}
+
+export function subscribeMyMediaLibrary(
+  uid: string,
+  onUpdate: (items: CloudMediaAsset[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(collection(db, 'media_library'), where('ownerId', '==', uid));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const items: CloudMediaAsset[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        const updatedTs = data.updatedAt as Timestamp | undefined;
+        return {
+          id: d.id,
+          ownerId: String(data.ownerId ?? uid),
+          kind: data.kind === 'cover' ? 'cover' : 'audio',
+          title: String(data.title ?? data.fileName ?? 'Archivo'),
+          fileName: String(data.fileName ?? ''),
+          fileSize: typeof data.fileSize === 'number' ? data.fileSize : 0,
+          url: String(data.url ?? ''),
+          updatedAtMs:
+            updatedTs && typeof updatedTs.toMillis === 'function'
+              ? updatedTs.toMillis()
+              : 0,
+          source: 'library',
+        };
+      });
+      items.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+      onUpdate(items);
+    },
+    (error) => {
+      if (onError) {
+        onError(error);
+      } else {
+        handleFirestoreError(error, OperationType.LIST, 'media_library');
+      }
+    }
+  );
+}
+
+export async function saveMediaLibraryItem(params: {
+  ownerId: string;
+  kind: 'audio' | 'cover';
+  title: string;
+  fileName: string;
+  fileSize: number;
+  url: string;
+}): Promise<string> {
+  const safeUrl = clampString(params.url, 1024);
+  if (!safeUrl) {
+    throw new Error('URL vacía al guardar en biblioteca.');
+  }
+
+  const mediaId = `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const path = `media_library/${mediaId}`;
+  const cleanTitle =
+    clampString(params.title.replace(/\.[^.]+$/, ''), 140) ||
+    clampString(params.fileName, 140) ||
+    'Archivo';
+  const cleanFileName = clampString(params.fileName, 160) || 'archivo';
+  const safeSize = Math.max(0, Math.min(52428800, Math.floor(params.fileSize || 0)));
+
+  try {
+    await setDoc(doc(db, 'media_library', mediaId), {
+      ownerId: params.ownerId,
+      kind: params.kind,
+      title: cleanTitle,
+      fileName: cleanFileName,
+      fileSize: safeSize,
+      url: safeUrl,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return mediaId;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteMediaLibraryItem(mediaId: string): Promise<void> {
+  const safeId = mediaId.trim();
+  if (!safeId || !VALID_ID_REGEX.test(safeId)) return;
+  const path = `media_library/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'media_library', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function buildMergedMediaLibrary(
+  libraryItems: CloudMediaAsset[],
+  cloudGifts: CloudGiftRecord[]
+): CloudMediaAsset[] {
+  const seenAudio = new Set<string>();
+  const seenCover = new Set<string>();
+  const merged: CloudMediaAsset[] = [];
+
+  for (const item of libraryItems) {
+    if (!item.url) continue;
+    const seen = item.kind === 'cover' ? seenCover : seenAudio;
+    if (seen.has(item.url)) continue;
+    seen.add(item.url);
+    merged.push(item);
+  }
+
+  for (const gift of cloudGifts) {
+    const giftName = gift.clientLabel || gift.config.title || gift.id;
+    for (const disc of gift.config.discs) {
+      if (disc.audioUrl && /^https?:\/\//i.test(disc.audioUrl) && !seenAudio.has(disc.audioUrl)) {
+        seenAudio.add(disc.audioUrl);
+        merged.push({
+          id: `gift-audio-${gift.id}-${disc.id}`,
+          ownerId: gift.ownerId,
+          kind: 'audio',
+          title: disc.title || 'Canción guardada',
+          fileName: disc.artist ? `${disc.title} — ${disc.artist}` : disc.title,
+          fileSize: 0,
+          url: disc.audioUrl,
+          updatedAtMs: gift.updatedAtMs,
+          source: 'gift',
+          originLabel: giftName,
+        });
+      }
+      if (disc.coverUrl && /^https?:\/\//i.test(disc.coverUrl) && !seenCover.has(disc.coverUrl)) {
+        seenCover.add(disc.coverUrl);
+        merged.push({
+          id: `gift-cover-${gift.id}-${disc.id}`,
+          ownerId: gift.ownerId,
+          kind: 'cover',
+          title: disc.title ? `Portada: ${disc.title}` : 'Portada guardada',
+          fileName: disc.title || 'portada',
+          fileSize: 0,
+          url: disc.coverUrl,
+          updatedAtMs: gift.updatedAtMs,
+          source: 'gift',
+          originLabel: giftName,
+        });
+      }
+    }
+  }
+
+  return merged;
+}
+
+export function findDuplicateMediaAsset(
+  items: CloudMediaAsset[],
+  kind: 'audio' | 'cover',
+  file: File
+): CloudMediaAsset | undefined {
+  const targetName = file.name.trim().toLowerCase();
+  return items.find(
+    (item) =>
+      item.kind === kind &&
+      item.url &&
+      item.fileSize > 0 &&
+      item.fileSize === file.size &&
+      item.fileName.trim().toLowerCase() === targetName
+  );
 }
 
 const CLOUDINARY_CLOUD_NAME = (

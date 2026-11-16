@@ -91,4 +91,19 @@ export const DIRTY_DOZEN_CASES = [
     op: 'update',
     payloadOverride: { finish: 'plastic' },
   },
+  {
+    name: 'Private Media Read by Stranger',
+    expected: 'PERMISSION_DENIED',
+    auth: { uid: 'stranger', email_verified: true },
+    path: 'media_library/media-owned-by-a',
+    op: 'get',
+  },
+  {
+    name: 'Media Kind Enum Poisoning',
+    expected: 'PERMISSION_DENIED',
+    auth: { uid: 'uid_a', email_verified: true },
+    path: 'media_library/media-1',
+    op: 'create',
+    payloadOverride: { kind: 'executable' },
+  },
 ] as const;

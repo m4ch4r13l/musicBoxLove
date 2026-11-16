@@ -9,17 +9,21 @@ import {
   Download,
   Eye,
   FolderOpen,
+  Image as ImageIcon,
+  Library,
   Link2,
   LogIn,
   LogOut,
+  Music2,
   Plus,
   RotateCcw,
   Save,
+  Search,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
-import type { CloudGiftRecord } from '../services/giftCloudService';
+import type { CloudGiftRecord, CloudMediaAsset } from '../services/giftCloudService';
 import type {
   PlinthFinish,
   SceneEnvironment,
@@ -44,6 +48,7 @@ interface EditorDrawerProps {
   clientLabel: string;
   isPublished: boolean;
   cloudGifts: CloudGiftRecord[];
+  mediaLibrary: CloudMediaAsset[];
   cloudSaving: boolean;
   uploadState: { discIndex: number; kind: 'audio' | 'cover'; progress: number } | null;
   onClose: () => void;
@@ -64,6 +69,7 @@ interface EditorDrawerProps {
   onLoadCloudGift: (record: CloudGiftRecord) => void;
   onCopyCloudGiftLink: (giftId: string) => void;
   onDeleteCloudGift: (giftId: string) => void;
+  onDeleteMediaAsset: (mediaId: string) => void;
   onUploadDiscMedia: (discIndex: number, kind: 'audio' | 'cover', file: File) => void;
 }
 
@@ -77,6 +83,7 @@ export function EditorDrawer({
   clientLabel,
   isPublished,
   cloudGifts,
+  mediaLibrary,
   cloudSaving,
   uploadState,
   onClose,
@@ -97,10 +104,26 @@ export function EditorDrawer({
   onLoadCloudGift,
   onCopyCloudGiftLink,
   onDeleteCloudGift,
+  onDeleteMediaAsset,
   onUploadDiscMedia,
 }: EditorDrawerProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'discs' | 'cloud'>('discs');
+  const [libraryPicker, setLibraryPicker] = useState<{
+    discIndex: number;
+    kind: 'audio' | 'cover';
+  } | null>(null);
+  const [librarySearch, setLibrarySearch] = useState('');
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
+
+  const audioAssets = mediaLibrary.filter((m) => m.kind === 'audio');
+  const coverAssets = mediaLibrary.filter((m) => m.kind === 'cover');
+
+  const toggleLibraryPicker = (discIndex: number, kind: 'audio' | 'cover') => {
+    setLibraryPicker((prev) =>
+      prev?.discIndex === discIndex && prev?.kind === kind ? null : { discIndex, kind }
+    );
+    setLibrarySearch('');
+  };
 
   const updateField = <K extends keyof TurntableConfig>(
     key: K,
@@ -559,13 +582,21 @@ export function EditorDrawer({
                       </select>
                     </div>
 
-                    {/* Audio MP3 URL + Firebase upload + Local test */}
+                    {/* Audio MP3 URL + Reusable Library + Cloud Upload + Local Test */}
                     <div className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
                         <label className="text-[11px] text-[#b8a898]">
                           Audio MP3
                         </label>
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-2.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => toggleLibraryPicker(idx, 'audio')}
+                            className="inline-flex items-center gap-1 text-[10px] text-[#f7efe6] hover:text-[#e89f65] hover:underline cursor-pointer"
+                          >
+                            <Library className="w-3 h-3 text-[#e89f65]" />
+                            <span>Ya subidas ({audioAssets.length})</span>
+                          </button>
                           <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
                             <CloudUpload className="w-3 h-3" />
                             <span>Subir MP3</span>
@@ -601,11 +632,119 @@ export function EditorDrawer({
                       <input
                         type="text"
                         maxLength={1024}
-                        placeholder="https://.../cancion.mp3 o sube un archivo"
+                        placeholder="https://.../cancion.mp3 o elige/sube un archivo"
                         value={disc.audioUrl.startsWith('blob:') ? '' : disc.audioUrl}
                         onChange={(e) => updateDisc(idx, 'audioUrl', e.target.value)}
                         className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
                       />
+                      {libraryPicker?.discIndex === idx && libraryPicker.kind === 'audio' && (
+                        <div className="mt-1 rounded-lg bg-[#16110e] border border-[#e89f65]/35 p-2.5 space-y-2">
+                          {!user ? (
+                            <div className="flex items-center justify-between gap-2 text-[11px] text-[#b8a898]">
+                              <span>Inicia sesión con Google para ver tus canciones subidas.</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab('cloud')}
+                                className="text-[#e89f65] font-medium hover:underline shrink-0 cursor-pointer"
+                              >
+                                Ir a Nube
+                              </button>
+                            </div>
+                          ) : audioAssets.length === 0 ? (
+                            <p className="text-[11px] text-[#b8a898]">
+                              Aún no tienes canciones guardadas. Sube tu primer MP3 y quedará disponible aquí para reutilizarlo en futuros clientes.
+                            </p>
+                          ) : (
+                            <>
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 text-[#b8a898] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                <input
+                                  type="text"
+                                  value={librarySearch}
+                                  onChange={(e) => setLibrarySearch(e.target.value)}
+                                  placeholder="Buscar canción ya subida..."
+                                  className="w-full bg-[#221a15] border border-[#ffe0bd]/12 rounded-md pl-7 pr-2.5 py-1 text-[11px] text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
+                                />
+                              </div>
+                              <div className="max-h-40 overflow-y-auto custom-scroll space-y-1">
+                                {audioAssets
+                                  .filter((asset) => {
+                                    const q = librarySearch.trim().toLowerCase();
+                                    if (!q) return true;
+                                    return (
+                                      asset.title.toLowerCase().includes(q) ||
+                                      asset.fileName.toLowerCase().includes(q) ||
+                                      (asset.originLabel ?? '').toLowerCase().includes(q)
+                                    );
+                                  })
+                                  .map((asset) => {
+                                    const inUse = disc.audioUrl === asset.url;
+                                    return (
+                                      <div
+                                        key={asset.id}
+                                        className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-[11px] ${
+                                          inUse
+                                            ? 'bg-[#2a2018] border-[#e89f65]/50'
+                                            : 'bg-[#1d1612] border-[#ffe0bd]/8'
+                                        }`}
+                                      >
+                                        <div className="min-w-0 flex items-center gap-2">
+                                          <Music2 className="w-3.5 h-3.5 text-[#e89f65] shrink-0" />
+                                          <div className="min-w-0">
+                                            <div className="text-[#f7efe6] font-medium truncate">
+                                              {asset.title}
+                                            </div>
+                                            <div className="text-[10px] text-[#b8a898] truncate">
+                                              {asset.originLabel
+                                                ? `Usada en: ${asset.originLabel}`
+                                                : asset.fileName}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const nextDiscs = config.discs.map((d, i) => {
+                                                if (i !== idx) return d;
+                                                const shouldFillTitle =
+                                                  !d.title.trim() || d.title.startsWith('Recuerdo #');
+                                                return {
+                                                  ...d,
+                                                  audioUrl: asset.url,
+                                                  title: shouldFillTitle ? asset.title : d.title,
+                                                };
+                                              });
+                                              onUpdateConfig({ ...config, discs: nextDiscs });
+                                              setLibraryPicker(null);
+                                            }}
+                                            className={`px-2 py-1 rounded text-[10px] font-semibold cursor-pointer ${
+                                              inUse
+                                                ? 'bg-[#e89f65]/20 text-[#e89f65]'
+                                                : 'bg-[#e89f65] text-[#1c120c] hover:bg-[#f2b07b]'
+                                            }`}
+                                          >
+                                            {inUse ? 'En uso' : 'Usar'}
+                                          </button>
+                                          {asset.source === 'library' && (
+                                            <button
+                                              type="button"
+                                              onClick={() => onDeleteMediaAsset(asset.id)}
+                                              title="Quitar de biblioteca"
+                                              className="p-1 rounded text-[#b8a898] hover:text-red-400 cursor-pointer"
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                       {uploadState?.discIndex === idx && uploadState.kind === 'audio' && (
                         <div className="space-y-1">
                           <div className="w-full h-1.5 rounded-full bg-[#2a211b] overflow-hidden">
@@ -626,40 +765,132 @@ export function EditorDrawer({
                       )}
                     </div>
 
-                    {/* Cover URL + Firebase upload */}
+                    {/* Cover URL + Reusable Library + Cloud Upload */}
                     <div className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
                         <label className="text-[11px] text-[#b8a898]">
                           Foto de portada (opcional)
                         </label>
-                        <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
-                          <CloudUpload className="w-3 h-3" />
-                          <span>Subir foto</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                if (!user) {
-                                  setActiveTab('cloud');
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleLibraryPicker(idx, 'cover')}
+                            className="inline-flex items-center gap-1 text-[10px] text-[#f7efe6] hover:text-[#e89f65] hover:underline cursor-pointer"
+                          >
+                            <Library className="w-3 h-3 text-[#e89f65]" />
+                            <span>Ya subidas ({coverAssets.length})</span>
+                          </button>
+                          <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
+                            <CloudUpload className="w-3 h-3" />
+                            <span>Subir foto</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  if (!user) {
+                                    setActiveTab('cloud');
+                                  }
+                                  onUploadDiscMedia(idx, 'cover', file);
                                 }
-                                onUploadDiscMedia(idx, 'cover', file);
-                              }
-                              e.target.value = '';
-                            }}
-                          />
-                        </label>
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
                       </div>
                       <input
                         type="text"
                         maxLength={1024}
-                        placeholder="https://.../foto.jpg o sube una imagen"
+                        placeholder="https://.../foto.jpg o elige/sube una imagen"
                         value={disc.coverUrl}
                         onChange={(e) => updateDisc(idx, 'coverUrl', e.target.value)}
                         className="bg-[#16110e] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
                       />
+                      {libraryPicker?.discIndex === idx && libraryPicker.kind === 'cover' && (
+                        <div className="mt-1 rounded-lg bg-[#16110e] border border-[#e89f65]/35 p-2.5 space-y-2">
+                          {!user ? (
+                            <div className="flex items-center justify-between gap-2 text-[11px] text-[#b8a898]">
+                              <span>Inicia sesión con Google para ver tus portadas subidas.</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab('cloud')}
+                                className="text-[#e89f65] font-medium hover:underline shrink-0 cursor-pointer"
+                              >
+                                Ir a Nube
+                              </button>
+                            </div>
+                          ) : coverAssets.length === 0 ? (
+                            <p className="text-[11px] text-[#b8a898]">
+                              Aún no tienes portadas guardadas. Sube una imagen y aparecerá aquí para reutilizarla.
+                            </p>
+                          ) : (
+                            <div className="max-h-36 overflow-y-auto custom-scroll space-y-1">
+                              {coverAssets.map((asset) => {
+                                const inUse = disc.coverUrl === asset.url;
+                                return (
+                                  <div
+                                    key={asset.id}
+                                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-[11px] ${
+                                      inUse
+                                        ? 'bg-[#2a2018] border-[#e89f65]/50'
+                                        : 'bg-[#1d1612] border-[#ffe0bd]/8'
+                                    }`}
+                                  >
+                                    <div className="min-w-0 flex items-center gap-2">
+                                      {asset.url ? (
+                                        <img
+                                          src={asset.url}
+                                          alt={asset.title}
+                                          className="w-7 h-7 rounded object-cover border border-white/15 shrink-0"
+                                        />
+                                      ) : (
+                                        <ImageIcon className="w-4 h-4 text-[#e89f65] shrink-0" />
+                                      )}
+                                      <div className="min-w-0">
+                                        <div className="text-[#f7efe6] font-medium truncate">
+                                          {asset.title}
+                                        </div>
+                                        <div className="text-[10px] text-[#b8a898] truncate">
+                                          {asset.originLabel || asset.fileName}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          updateDisc(idx, 'coverUrl', asset.url);
+                                          setLibraryPicker(null);
+                                        }}
+                                        className={`px-2 py-1 rounded text-[10px] font-semibold cursor-pointer ${
+                                          inUse
+                                            ? 'bg-[#e89f65]/20 text-[#e89f65]'
+                                            : 'bg-[#e89f65] text-[#1c120c] hover:bg-[#f2b07b]'
+                                        }`}
+                                      >
+                                        {inUse ? 'En uso' : 'Usar'}
+                                      </button>
+                                      {asset.source === 'library' && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onDeleteMediaAsset(asset.id)}
+                                          title="Quitar de biblioteca"
+                                          className="p-1 rounded text-[#b8a898] hover:text-red-400 cursor-pointer"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {uploadState?.discIndex === idx && uploadState.kind === 'cover' && (
                         <div className="space-y-1">
                           <div className="w-full h-1.5 rounded-full bg-[#2a211b] overflow-hidden">
