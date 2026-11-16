@@ -432,15 +432,15 @@ export default function App() {
         }));
         showToast(
           kind === 'audio'
-            ? 'MP3 subido a Firebase y vinculado al vinilo'
-            : 'Portada subida a Firebase y vinculada al vinilo'
+            ? 'MP3 subido a la nube y vinculado al vinilo'
+            : 'Portada subida a la nube y vinculada al vinilo'
         );
       } catch (err) {
         console.error(err);
         showToast(
-          err instanceof Error && err.message.includes('límite')
+          err instanceof Error && err.message
             ? err.message
-            : 'Error al subir a Firebase Storage (revisa reglas/plan Blaze en tu consola)'
+            : 'No se pudo subir el archivo a la nube'
         );
       } finally {
         setUploadState(null);

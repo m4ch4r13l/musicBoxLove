@@ -247,6 +247,84 @@ export async function deleteCloudGift(giftId: string): Promise<void> {
   }
 }
 
+const CLOUDINARY_CLOUD_NAME = (
+  import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || ''
+).trim();
+const CLOUDINARY_UPLOAD_PRESET = (
+  import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || ''
+).trim();
+
+export function isCloudinaryConfigured(): boolean {
+  return Boolean(CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET);
+}
+
+function uploadToCloudinary(params: {
+  giftId: string;
+  file: File;
+  kind: 'audio' | 'cover';
+  onProgress?: (percent: number) => void;
+}): Promise<string> {
+  const safeGift = sanitizeGiftId(params.giftId || 'borrador');
+  const resourceType = params.kind === 'cover' ? 'image' : 'video';
+  const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(
+    CLOUDINARY_CLOUD_NAME
+  )}/${resourceType}/upload`;
+
+  const formData = new FormData();
+  formData.append('file', params.file);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  formData.append('folder', `musicboxlove/${safeGift}`);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', endpoint, true);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        const pct = Math.min(99, Math.round((event.loaded / event.total) * 100));
+        params.onProgress?.(pct);
+      }
+    };
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText || '{}') as {
+          secure_url?: string;
+          error?: { message?: string };
+        };
+        if (xhr.status >= 200 && xhr.status < 300 && data.secure_url) {
+          params.onProgress?.(100);
+          resolve(data.secure_url);
+          return;
+        }
+        const rawErr = data.error?.message || `Error HTTP ${xhr.status}`;
+        if (rawErr.toLowerCase().includes('preset')) {
+          reject(
+            new Error(
+              'El Upload Preset de Cloudinary no existe o no está en modo Unsigned.'
+            )
+          );
+          return;
+        }
+        reject(new Error(`Cloudinary: ${rawErr}`));
+      } catch {
+        reject(new Error('Respuesta inesperada de Cloudinary al subir el archivo.'));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('Error de red al conectar con Cloudinary.'));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error('Tiempo de espera agotado al subir a Cloudinary.'));
+    };
+
+    xhr.timeout = 120000;
+    xhr.send(formData);
+  });
+}
+
 export function uploadClientMedia(params: {
   ownerId: string;
   giftId: string;
@@ -265,6 +343,15 @@ export function uploadClientMedia(params: {
     );
   }
 
+  if (isCloudinaryConfigured()) {
+    return uploadToCloudinary({
+      giftId: params.giftId,
+      file: params.file,
+      kind: params.kind,
+      onProgress: params.onProgress,
+    });
+  }
+
   const safeGift = sanitizeGiftId(params.giftId || 'borrador');
   const cleanName = params.file.name
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
@@ -273,22 +360,75 @@ export function uploadClientMedia(params: {
   const storageRef = ref(storage, storagePath);
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let lastBytes = 0;
+
+    const finishReject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(stallTimer);
+      reject(err);
+    };
+
     const task = uploadBytesResumable(storageRef, params.file, {
       contentType: params.file.type || (params.kind === 'audio' ? 'audio/mpeg' : 'image/jpeg'),
     });
 
+    const stallTimer = window.setTimeout(() => {
+      if (!settled && lastBytes === 0) {
+        task.cancel();
+        finishReject(
+          new Error(
+            'Falta configurar Cloudinary (VITE_CLOUDINARY_*) o activar Firebase Storage.'
+          )
+        );
+      }
+    }, 12000);
+
     task.on(
       'state_changed',
       (snapshot) => {
+        lastBytes = snapshot.bytesTransferred;
+        if (snapshot.bytesTransferred > 0) {
+          window.clearTimeout(stallTimer);
+        }
         if (snapshot.totalBytes > 0) {
           const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
           params.onProgress?.(pct);
         }
       },
       (err) => {
-        reject(err);
+        const code = (err as { code?: string })?.code ?? '';
+        if (code === 'storage/bucket-not-found' || code === 'storage/project-not-found') {
+          finishReject(
+            new Error(
+              'El bucket de Firebase Storage no está activado en tu proyecto Firebase.'
+            )
+          );
+          return;
+        }
+        if (code === 'storage/unauthorized' || code === 'storage/unauthenticated') {
+          finishReject(
+            new Error(
+              'Sin permisos en Firebase Storage. Revisa Storage → Rules en Firebase Console.'
+            )
+          );
+          return;
+        }
+        if (code === 'storage/retry-limit-exceeded') {
+          finishReject(
+            new Error(
+              'Firebase Storage no está disponible; configura Cloudinary o activa Storage.'
+            )
+          );
+          return;
+        }
+        finishReject(err instanceof Error ? err : new Error('No se pudo subir el archivo.'));
       },
       () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(stallTimer);
         getDownloadURL(task.snapshot.ref).then(resolve).catch(reject);
       }
     );

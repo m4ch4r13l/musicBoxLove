@@ -568,7 +568,7 @@ export function EditorDrawer({
                         <div className="flex items-center gap-2.5">
                           <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
                             <CloudUpload className="w-3 h-3" />
-                            <span>Subir a Firebase</span>
+                            <span>Subir MP3</span>
                             <input
                               type="file"
                               accept="audio/*"
@@ -615,13 +615,13 @@ export function EditorDrawer({
                             />
                           </div>
                           <span className="text-[10px] text-[#e89f65]">
-                            Subiendo audio a Firebase... {uploadState.progress}%
+                            Subiendo audio a la nube... {uploadState.progress}%
                           </span>
                         </div>
                       )}
                       {disc.audioUrl.startsWith('blob:') && (
                         <span className="text-[10px] text-[#b8a898]">
-                          Audio local solo para esta sesión. Usa “Subir a Firebase” o una URL pública para compartir.
+                          Audio local solo para esta sesión. Usa “Subir MP3” o una URL pública para compartir.
                         </span>
                       )}
                     </div>
@@ -669,7 +669,7 @@ export function EditorDrawer({
                             />
                           </div>
                           <span className="text-[10px] text-[#e89f65]">
-                            Subiendo portada a Firebase... {uploadState.progress}%
+                            Subiendo portada a la nube... {uploadState.progress}%
                           </span>
                         </div>
                       )}
