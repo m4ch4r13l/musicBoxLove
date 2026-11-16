@@ -113,6 +113,7 @@ export function EditorDrawer({
     kind: 'audio' | 'cover';
   } | null>(null);
   const [librarySearch, setLibrarySearch] = useState('');
+  const [confirmDeleteGiftId, setConfirmDeleteGiftId] = useState<string | null>(null);
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
 
   const audioAssets = mediaLibrary.filter((m) => m.kind === 'audio');
@@ -1108,14 +1109,36 @@ export function EditorDrawer({
                                 <Copy className="w-3 h-3 text-[#e89f65]" />
                                 Link
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => onDeleteCloudGift(rec.id)}
-                                title="Eliminar regalo"
-                                className="p-1.5 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[#b8a898] hover:text-red-400 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {confirmDeleteGiftId === rec.id ? (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmDeleteGiftId(null);
+                                      onDeleteCloudGift(rec.id);
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white text-[10px] font-semibold cursor-pointer"
+                                  >
+                                    Borrar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteGiftId(null)}
+                                    className="px-2 py-1 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[#b8a898] hover:text-[#f7efe6] text-[10px] cursor-pointer"
+                                  >
+                                    No
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteGiftId(rec.id)}
+                                  title="Eliminar cliente (conserva tus archivos en biblioteca)"
+                                  className="p-1.5 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[#b8a898] hover:text-red-400 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );

@@ -420,7 +420,7 @@ export default function App() {
         if (activeGiftId === giftId) {
           setActiveGiftId('');
         }
-        showToast('Regalo eliminado de Firebase');
+        showToast('Cliente eliminado de Firebase (tus archivos siguen en Cloudinary)');
       } catch (err) {
         console.error(err);
         showToast('No se pudo eliminar el regalo');
