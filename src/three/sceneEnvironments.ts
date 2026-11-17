@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneEnvironment } from '../types/turntable';
+import { buildStudioEnvironment } from './studioEnvironment';
 
 export interface EnvironmentStyle {
   fogColor: number;
@@ -114,15 +115,15 @@ const ENV_STYLES: Record<
     skyGlow: 0x2d1e15,
     sunDir: [0.45, 0.55, 0.55],
     nebulaMode: 0,
-    fogColor: 0x100c0a,
-    fogDensity: 0.011,
-    hemiSky: 0xcbd8f0,
-    hemiGround: 0x3b2618,
-    hemiIntensity: 0.65,
-    keyColor: 0xffd7b0,
-    keyIntensity: 62,
-    rimColor: 0xe88b5a,
-    rimIntensity: 14,
+    fogColor: 0x181210,
+    fogDensity: 0.0028,
+    hemiSky: 0xdce4f5,
+    hemiGround: 0x543826,
+    hemiIntensity: 0.92,
+    keyColor: 0xffdfb8,
+    keyIntensity: 68,
+    rimColor: 0xf29c64,
+    rimIntensity: 18,
     exposure: 1.12,
     particleColorA: 0xffc78a,
     particleColorB: 0xffebd1,
@@ -628,28 +629,6 @@ function createMoonTextures(maxAnisotropy: number): {
   const bumpMap = new THREE.CanvasTexture(bump);
   bumpMap.anisotropy = maxAnisotropy;
   return { map, bumpMap };
-}
-
-function createStudioTableTexture(maxAnisotropy: number): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#171210';
-    ctx.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 1600; i++) {
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 232, 210, 0.018)' : 'rgba(0, 0, 0, 0.14)';
-      ctx.fillRect(Math.random() * 512, Math.random() * 512, 2, 2);
-    }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(6, 6);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = maxAnisotropy;
-  return tex;
 }
 
 function valleyHeightAt(x: number, z: number): number {
@@ -1503,20 +1482,7 @@ export class SceneEnvironmentController {
   }
 
   private buildStudioGroup(): THREE.Group {
-    const group = new THREE.Group();
-    const tabletopTex = createStudioTableTexture(this.maxAnisotropy);
-    const tabletopGeo = new THREE.CircleGeometry(55, 64);
-    const tabletopMat = new THREE.MeshStandardMaterial({
-      map: tabletopTex,
-      roughness: 0.85,
-      metalness: 0.06,
-    });
-    const tabletop = new THREE.Mesh(tabletopGeo, tabletopMat);
-    tabletop.rotation.x = -Math.PI / 2;
-    tabletop.receiveShadow = true;
-    group.add(tabletop);
-    this.disposables.push(tabletopTex, tabletopGeo, tabletopMat);
-    return group;
+    return buildStudioEnvironment(this.maxAnisotropy, this.disposables);
   }
 
   public dispose(): void {
