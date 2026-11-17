@@ -131,6 +131,7 @@ export class TurntableScene {
   private lastPinchEndMs = 0;
 
   // Scene references for animation & updates
+  private turntableGroup: THREE.Group;
   private platterGroup: THREE.Group;
   private discGroup: THREE.Group;
   private tonearmArm: THREE.Group;
@@ -181,7 +182,7 @@ export class TurntableScene {
     this.sceneFog = new THREE.FogExp2(0x87997a, 0.008);
     this.scene.fog = this.sceneFog;
 
-    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 150);
+    this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 500);
     const portraitScale = this.getPortraitDistanceScale(aspect);
     this.camera.position.set(
       CAMERA_PRESETS.overview.pos[0] * portraitScale,
@@ -219,7 +220,7 @@ export class TurntableScene {
     this.controls.enableDamping = !this.isSoftwareGl;
     this.controls.dampingFactor = 0.06;
     this.controls.minDistance = 2.4;
-    this.controls.maxDistance = 55;
+    this.controls.maxDistance = 44;
     this.controls.zoomSpeed = 1.4;
     this.controls.maxPolarAngle = Math.PI * 0.46;
     this.controls.minPolarAngle = 0.08;
@@ -251,6 +252,13 @@ export class TurntableScene {
     this.envController = new SceneEnvironmentController(this.scene, maxAnisotropy, 'valley');
     const initialEnvStyle = this.envController.setEnvironment('valley');
 
+    // =========================================================
+    // TURNTABLE COMPOSITE GROUP
+    // =========================================================
+    this.turntableGroup = new THREE.Group();
+    const turntable = this.turntableGroup;
+    this.scene.add(turntable);
+
     const shadowTex = createContactShadowTexture();
     const shadowGeo = new THREE.PlaneGeometry(7.2, 5.8);
     const shadowMat = new THREE.MeshBasicMaterial({
@@ -262,14 +270,8 @@ export class TurntableScene {
     const contactShadow = new THREE.Mesh(shadowGeo, shadowMat);
     contactShadow.rotation.x = -Math.PI / 2;
     contactShadow.position.y = 0.006;
-    this.scene.add(contactShadow);
+    turntable.add(contactShadow);
     this.disposables.push(shadowTex, shadowGeo, shadowMat);
-
-    // =========================================================
-    // TURNTABLE COMPOSITE GROUP
-    // =========================================================
-    const turntable = new THREE.Group();
-    this.scene.add(turntable);
 
     // 1. Isolation feet (4x LatheGeometry seated at y=0)
     const footProfile = [
@@ -1082,10 +1084,24 @@ export class TurntableScene {
 
   public setEnvironment(environment: SceneEnvironment): void {
     const style = this.envController.setEnvironment(environment);
+    if (environment !== 'ocean') {
+      this.turntableGroup.position.set(0, 0, 0);
+      this.turntableGroup.quaternion.identity();
+    }
+    this.controls.maxDistance =
+      environment === 'studio' ? 17.5 : environment === 'forest' ? 40 : 44;
+    this.controls.maxPolarAngle =
+      environment === 'space' ? Math.PI * 0.88 : Math.PI * 0.46;
+    if (this.targetZoomDistance !== null) {
+      this.targetZoomDistance = Math.min(this.targetZoomDistance, this.controls.maxDistance);
+    }
     this.applyEnvironmentStyle(style);
   }
 
   private applyEnvironmentStyle(style: EnvironmentStyle): void {
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.setHex(style.fogColor);
+    }
     this.sceneFog.color.setHex(style.fogColor);
     this.sceneFog.density = style.fogDensity;
     this.hemiLight.color.setHex(style.hemiSky);
@@ -1531,7 +1547,16 @@ export class TurntableScene {
     this.particleRotationY +=
       dt * (0.025 + this.particleMotionPulse * 0.048);
     this.ambientParticles.rotation.y = this.particleRotationY;
-    this.envController.update(elapsed);
+    this.envController.update(elapsed, dt);
+
+    const platformMotion = this.envController.getPlatformMotion();
+    if (platformMotion) {
+      this.turntableGroup.position.copy(platformMotion.position);
+      this.turntableGroup.quaternion.copy(platformMotion.quaternion);
+    } else {
+      this.turntableGroup.position.set(0, 0, 0);
+      this.turntableGroup.quaternion.identity();
+    }
 
     if (!this.cinematicActive) {
       this.controls.update();
