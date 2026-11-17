@@ -103,7 +103,7 @@ export class TurntableScene {
   // Dynamic state
   private isPlaying = false;
   private rpm: RpmMode = 33;
-  private dustCoverOpen = true;
+  private dustCoverOpen = false;
   private platterSpeed = 0;
   private armPhase: ArmPhase = 'parked';
   private cueToken = 0;
@@ -114,6 +114,7 @@ export class TurntableScene {
   private synthProgress = 0;
   private discLiftOffset = 0;
   private discLiftPhase: 'idle' | 'lifting' | 'dropping' = 'idle';
+  private discSwapWaitingForPark = false;
   private pendingDisc: VinylDisc | null = null;
   private currentDisc: VinylDisc | null = null;
 
@@ -147,6 +148,9 @@ export class TurntableScene {
   private ambientParticles: THREE.Points;
   private particleMat: THREE.ShaderMaterial;
   private particlePlayingMix = 0;
+  private particleRotationY = 0;
+  private particleFlightTime = 0;
+  private particleMotionPulse = 0;
   private envController: SceneEnvironmentController;
   private sceneFog: THREE.FogExp2;
   private hemiLight: THREE.HemisphereLight;
@@ -679,7 +683,7 @@ export class TurntableScene {
     coverMesh.position.set(0, 0.24, 1.84);
     coverMesh.renderOrder = 4;
     this.dustCoverPivot.add(coverMesh);
-    this.dustCoverPivot.rotation.x = -0.95; // Initially open to show off vinyl & tonearm
+    this.dustCoverPivot.rotation.x = 0; // Start closed on load before opening smoothly
 
     this.disposables.push(hingeGeo, acrylicMat, coverGeo);
 
@@ -710,11 +714,13 @@ export class TurntableScene {
     this.particleMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
+        uFlightTime: { value: 0 },
         uPixelRatio: { value: this.renderer.getPixelRatio() },
         uBass: { value: 0 },
         uMid: { value: 0 },
         uHigh: { value: 0 },
         uPulse: { value: 0 },
+        uMotionPulse: { value: 0 },
         uPlaying: { value: 0 },
         uColorA: { value: new THREE.Color(initialEnvStyle.particleColorA) },
         uColorB: { value: new THREE.Color(initialEnvStyle.particleColorB) },
@@ -725,11 +731,13 @@ export class TurntableScene {
         attribute float aScale;
 
         uniform float uTime;
+        uniform float uFlightTime;
         uniform float uPixelRatio;
         uniform float uBass;
         uniform float uMid;
         uniform float uHigh;
         uniform float uPulse;
+        uniform float uMotionPulse;
         uniform float uPlaying;
 
         varying float vAlpha;
@@ -737,23 +745,36 @@ export class TurntableScene {
 
         void main() {
           float bandEnergy = aBand < 0.25 ? uBass : (aBand < 0.75 ? uMid : uHigh);
-          float shimmer = 0.5 + 0.5 * sin(uTime * (1.8 + aBand * 2.4) + aPhase);
-          float beatReact = pow(shimmer, 1.45) * (0.3 + bandEnergy * 0.85 + uPulse * (1.2 - aBand * 0.3));
-          float activity = mix(0.24 * shimmer, beatReact, uPlaying);
+          float fireflyBreath = 0.5 + 0.5 * sin(uTime * 1.15 + aPhase);
+          float beatWeight = aBand < 0.25 ? 1.05 : (aBand < 0.75 ? 0.8 : 0.55);
+          // Organic variation (0.68..1.0) keeps firefly depth while ensuring all react on the beat
+          float swarmDepth = 0.68 + 0.32 * sin(uTime * 0.85 + aPhase * 1.3);
+          float audioDrive = clamp((bandEnergy * 0.85 + uPulse * beatWeight * 0.95) * swarmDepth, 0.0, 1.3);
+          float activity = mix(0.24 * fireflyBreath, audioDrive, uPlaying);
 
+          // Individual 3D Lissajous wandering flight driven by monotonic uFlightTime (never whips on play/pause)
+          float bandSpeed = 1.0 + aBand * 0.14;
           vec3 pos = position;
-          pos.y += sin(uTime * 0.7 + aPhase) * 0.1 + uPulse * 0.07 * (1.0 - aBand * 0.4) * uPlaying;
-          pos.xz *= 1.0 + uPulse * 0.018 * uPlaying;
+          pos.x += sin(uFlightTime * bandSpeed + aPhase * 1.7) * 0.44
+                 + cos(uFlightTime * 0.52 + aPhase * 3.1) * 0.22;
+          pos.y += sin(uFlightTime * (bandSpeed * 1.22) + aPhase * 2.3) * 0.34
+                 + cos(uFlightTime * 0.61 + aPhase * 1.1) * 0.14;
+          pos.z += cos(uFlightTime * (bandSpeed * 0.92) + aPhase * 2.9) * 0.44
+                 + sin(uFlightTime * 0.46 + aPhase * 1.9) * 0.22;
+
+          // Gentle inertia-damped float & outward breath (rhythm snaps go into glow, not erratic spatial jerks)
+          pos.y += uMotionPulse * 0.095 * beatWeight * uPlaying;
+          pos.xz *= 1.0 + uMotionPulse * 0.018 * beatWeight * uPlaying;
 
           vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
           gl_Position = projectionMatrix * mvPosition;
 
-          float baseSize = mix(7.0, 10.5, uPlaying) + activity * 14.0;
+          float baseSize = mix(7.0, 8.6, uPlaying) + activity * 13.5;
           float dist = max(-mvPosition.z, 1.2);
-          gl_PointSize = clamp(aScale * baseSize * uPixelRatio * (4.2 / dist), 1.5, 18.0);
+          gl_PointSize = clamp(aScale * baseSize * uPixelRatio * (4.3 / dist), 1.8, 20.5);
 
-          vAlpha = clamp(mix(0.12 + 0.16 * shimmer, 0.08 + activity * 0.62, uPlaying), 0.05, 0.78);
-          vHeat = clamp(bandEnergy * 0.55 + uPulse * 0.8, 0.0, 1.0);
+          vAlpha = clamp(mix(0.16 + 0.20 * fireflyBreath, 0.18 + activity * 0.66, uPlaying), 0.08, 0.90);
+          vHeat = clamp(bandEnergy * 0.52 + uPulse * 0.84, 0.0, 1.0);
         }
       `,
       fragmentShader: `
@@ -767,11 +788,13 @@ export class TurntableScene {
           float d = length(uv);
           if (d > 0.5) discard;
 
-          float core = smoothstep(0.5, 0.05, d);
-          float glow = pow(core, 2.2);
-          vec3 color = mix(uColorA, uColorB, vHeat * core);
+          float halo = smoothstep(0.5, 0.04, d);
+          float innerCore = smoothstep(0.22, 0.0, d);
+          float glow = pow(halo, 1.85) + innerCore * 0.55;
+          vec3 warmCore = mix(uColorA, vec3(1.0, 0.96, 0.85), innerCore * (0.45 + vHeat * 0.4));
+          vec3 color = mix(warmCore, uColorB, vHeat * halo * 0.85);
 
-          gl_FragColor = vec4(color, glow * vAlpha);
+          gl_FragColor = vec4(color, clamp(glow * vAlpha, 0.0, 1.0));
         }
       `,
       transparent: true,
@@ -967,18 +990,34 @@ export class TurntableScene {
   };
 
   public setDisc(disc: VinylDisc, animateSwap = true): void {
+    const hadDisc = this.currentDisc !== null;
     const isDifferent = !this.currentDisc || this.currentDisc.id !== disc.id;
     this.currentDisc = disc;
 
     if (isDifferent) {
       this.synthProgress = 0;
+      this.externalProgress = 0;
     }
 
-    if (animateSwap && isDifferent && this.discLiftPhase === 'idle') {
+    if (animateSwap && hadDisc && isDifferent) {
       this.pendingDisc = disc;
-      this.discLiftPhase = 'lifting';
-    } else {
+      if (this.armPhase !== 'parked') {
+        this.discSwapWaitingForPark = true;
+        if (
+          this.armPhase !== 'park_lift' &&
+          this.armPhase !== 'park_swing' &&
+          this.armPhase !== 'park_drop'
+        ) {
+          this.armPhase = 'park_lift';
+        }
+      } else {
+        this.discSwapWaitingForPark = false;
+        this.discLiftPhase = 'lifting';
+      }
+    } else if (!this.discSwapWaitingForPark && this.discLiftPhase === 'idle') {
       this.applyDiscVisuals(disc);
+    } else if (this.pendingDisc) {
+      this.pendingDisc = disc;
     }
   }
 
@@ -1004,7 +1043,9 @@ export class TurntableScene {
       this.strobeLightMat.emissiveIntensity = 2.4;
       this.cueToken++;
       this.pendingCueToken = this.cueToken;
-      this.armPhase = 'cue_lift';
+      if (!this.discSwapWaitingForPark && this.discLiftPhase === 'idle') {
+        this.armPhase = 'cue_lift';
+      }
     } else {
       this.ledMat.emissiveIntensity = 0.25;
       this.strobeLightMat.emissiveIntensity = 0.2;
@@ -1021,6 +1062,9 @@ export class TurntableScene {
     if (!this.isPlaying) return;
     this.cueToken++;
     this.pendingCueToken = this.cueToken;
+    if (this.discSwapWaitingForPark || this.discLiftPhase !== 'idle') {
+      return;
+    }
     this.armPhase = 'reposition_lift';
   }
 
@@ -1123,12 +1167,18 @@ export class TurntableScene {
     const dt = Math.min(this.clock.getDelta(), 0.08);
     const elapsed = this.clock.getElapsedTime();
 
-    // 1. Platter inertia (33.3 RPM vs 45 RPM)
-    const targetSpeed = this.isPlaying ? (this.rpm === 45 ? 3.25 : 2.35) : 0;
+    // 1. Platter inertia (33.3 RPM vs 45 RPM) — pause drive cleanly during disc swap
+    const isSwappingDisc = this.discSwapWaitingForPark || this.discLiftPhase !== 'idle';
+    const targetSpeed = this.isPlaying && !isSwappingDisc ? (this.rpm === 45 ? 3.25 : 2.35) : 0;
     this.platterSpeed = THREE.MathUtils.damp(this.platterSpeed, targetSpeed, 3.2, dt);
     this.platterGroup.rotation.y -= this.platterSpeed * dt;
 
-    // 2. Disc swap lift & drop transition
+    // 2. Disc swap lift & drop transition (starts only after tonearm is parked)
+    if (this.discSwapWaitingForPark && this.armPhase === 'parked') {
+      this.discSwapWaitingForPark = false;
+      this.discLiftPhase = 'lifting';
+    }
+
     if (this.discLiftPhase === 'lifting') {
       this.discLiftOffset = THREE.MathUtils.damp(this.discLiftOffset, 0.36, 12, dt);
       if (this.discLiftOffset > 0.32) {
@@ -1143,6 +1193,13 @@ export class TurntableScene {
       if (this.discLiftOffset < 0.004) {
         this.discLiftOffset = 0;
         this.discLiftPhase = 'idle';
+        if (this.isPlaying && this.armPhase === 'parked') {
+          if (this.pendingCueToken === 0) {
+            this.cueToken++;
+            this.pendingCueToken = this.cueToken;
+          }
+          this.armPhase = 'cue_lift';
+        }
       }
     }
     this.discGroup.position.y = this.discLiftOffset;
@@ -1334,7 +1391,7 @@ export class TurntableScene {
     this.dustCoverPivot.rotation.x = THREE.MathUtils.damp(
       this.dustCoverPivot.rotation.x,
       targetCoverAngle,
-      5,
+      4.0,
       dt
     );
 
@@ -1449,21 +1506,31 @@ export class TurntableScene {
       }
     }
 
-    // 6. Audio-reactive motes (blink and breathe with the beat)
+    // 6. Audio-reactive motes (smooth firefly flight + rhythmic glow on the beat)
     const levels = this.callbacks.getAudioLevels?.();
     const targetMix = levels?.active ? 1 : 0;
-    this.particlePlayingMix = THREE.MathUtils.damp(this.particlePlayingMix, targetMix, 6, dt);
+    this.particlePlayingMix = THREE.MathUtils.damp(this.particlePlayingMix, targetMix, 3.6, dt);
+
+    const rawPulse = levels?.pulse ?? 0;
+    const rawEnergy = ((levels?.bass ?? 0) * 0.55 + rawPulse * 0.75) * this.particlePlayingMix;
+    this.particleMotionPulse = THREE.MathUtils.damp(this.particleMotionPulse, rawEnergy, 4.2, dt);
+
+    // Accumulate flight phase monotonically so changing speed on play/pause never jumps phase
+    this.particleFlightTime += dt * THREE.MathUtils.lerp(0.36, 0.54, this.particlePlayingMix);
 
     const uniforms = this.particleMat.uniforms;
     uniforms.uTime.value = elapsed;
-    uniforms.uBass.value = levels?.bass ?? 0;
-    uniforms.uMid.value = levels?.mid ?? 0;
-    uniforms.uHigh.value = levels?.high ?? 0;
-    uniforms.uPulse.value = levels?.pulse ?? 0;
+    uniforms.uFlightTime.value = this.particleFlightTime;
+    uniforms.uBass.value = (levels?.bass ?? 0) * this.particlePlayingMix;
+    uniforms.uMid.value = (levels?.mid ?? 0) * this.particlePlayingMix;
+    uniforms.uHigh.value = (levels?.high ?? 0) * this.particlePlayingMix;
+    uniforms.uPulse.value = rawPulse * this.particlePlayingMix;
+    uniforms.uMotionPulse.value = this.particleMotionPulse;
     uniforms.uPlaying.value = this.particlePlayingMix;
 
-    this.ambientParticles.rotation.y =
-      elapsed * 0.025 + (levels?.pulse ?? 0) * 0.015 * this.particlePlayingMix;
+    this.particleRotationY +=
+      dt * (0.025 + this.particleMotionPulse * 0.048);
+    this.ambientParticles.rotation.y = this.particleRotationY;
     this.envController.update(elapsed);
 
     if (!this.cinematicActive) {

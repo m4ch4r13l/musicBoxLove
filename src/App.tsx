@@ -73,7 +73,8 @@ export default function App() {
   const [currentDiscIndex, setCurrentDiscIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [rpm, setRpm] = useState<RpmMode>(33);
-  const [dustCoverOpen, setDustCoverOpen] = useState(true);
+  const [dustCoverOpen, setDustCoverOpen] = useState(false);
+  const initialCoverOpenedRef = useRef(false);
   const [crackleEnabled, setCrackleEnabled] = useState(true);
   const [volume, setVolume] = useState(0.72);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('overview');
@@ -212,6 +213,17 @@ export default function App() {
       cancelled = true;
     };
   }, [initialState.cloudGiftId]);
+
+  // Start with the dust cover closed and open it smoothly once the scene is visible
+  useEffect(() => {
+    if (initialCoverOpenedRef.current) return;
+    if (cloudGiftLoading || cloudGiftError || !sceneReady) return;
+    const timer = window.setTimeout(() => {
+      initialCoverOpenedRef.current = true;
+      setDustCoverOpen(true);
+    }, 420);
+    return () => window.clearTimeout(timer);
+  }, [cloudGiftLoading, cloudGiftError, sceneReady]);
 
   const safeDiscIndex = Math.min(currentDiscIndex, Math.max(0, config.discs.length - 1));
   const currentDisc = config.discs[safeDiscIndex] ?? DEFAULT_CONFIG.discs[0];
@@ -714,7 +726,10 @@ export default function App() {
           onPrevDisc={handlePrevDisc}
           onNextDisc={handleNextDisc}
           onToggleRpm={handleToggleRpm}
-          onToggleDustCover={() => setDustCoverOpen((o) => !o)}
+          onToggleDustCover={() => {
+            initialCoverOpenedRef.current = true;
+            setDustCoverOpen((o) => !o);
+          }}
           onToggleCrackle={handleToggleCrackle}
           onChangeVolume={handleChangeVolume}
           onSelectCameraPreset={handleSelectCameraPreset}

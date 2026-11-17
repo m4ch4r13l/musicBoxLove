@@ -115,13 +115,21 @@ export class VinylAudioEngine {
   private fallbackActive = false;
   private step = 0;
   private unlockedEls = new WeakSet<HTMLAudioElement>();
+  private nonCorsUrls = new Set<string>();
 
   // Beat / onset detection state (zero-allocation per frame)
-  private avgBass = 0;
+  private fastAvgBass = 0;
+  private slowAvgEnergy = 0.12;
+  private prevBass = 0;
+  private prevMid = 0;
+  private prevHigh = 0;
   private smoothBass = 0;
   private smoothMid = 0;
   private smoothHigh = 0;
   private beatPulse = 0;
+  private beatCooldown = 0;
+  private wasReactiveActive = false;
+  private reactiveStartMs = 0;
   private reactiveLevels: AudioReactiveLevels = {
     bass: 0,
     mid: 0,
@@ -140,14 +148,17 @@ export class VinylAudioEngine {
   ) {
     this.onStatusChange = onStatusChange;
     this.onTrackEnded = onTrackEnded;
-    this.analyzedAudio = this.createAudioElement();
-    this.plainAudio = this.createAudioElement();
+    this.analyzedAudio = this.createAudioElement(true);
+    this.plainAudio = this.createAudioElement(false);
     this.activeAudioEl = this.plainAudio;
   }
 
-  private createAudioElement(): HTMLAudioElement {
+  private createAudioElement(useCors: boolean): HTMLAudioElement {
     const el = new Audio();
     el.preload = 'metadata';
+    if (useCors) {
+      el.crossOrigin = 'anonymous';
+    }
 
     el.addEventListener('ended', () => {
       if (el !== this.activeAudioEl || !this.isPlaying) return;
@@ -169,6 +180,22 @@ export class VinylAudioEngine {
       }
     });
 
+    el.addEventListener('error', () => {
+      if (!useCors || el !== this.activeAudioEl || !this.currentDisc) return;
+      const failedUrl = this.loadedUrlMap.get(el) || this.currentDisc.audioUrl?.trim();
+      if (!failedUrl || failedUrl.startsWith('blob:') || failedUrl.startsWith('data:')) return;
+      if (this.nonCorsUrls.has(failedUrl)) return;
+
+      this.nonCorsUrls.add(failedUrl);
+      if (this.isPlaying && !this.inLeadIn) {
+        const plain = this.configureAudioElement(this.currentDisc, false);
+        if (plain && plain === this.plainAudio) {
+          plain.muted = false;
+          plain.play().catch(() => {});
+        }
+      }
+    });
+
     el.addEventListener('timeupdate', () => {
       if (el === this.activeAudioEl) {
         this.emitStatus();
@@ -185,10 +212,11 @@ export class VinylAudioEngine {
   }
 
   private canAnalyseUrl(url: string): boolean {
+    if (this.nonCorsUrls.has(url)) return false;
     try {
       if (url.startsWith('blob:') || url.startsWith('data:')) return true;
       const resolved = new URL(url, window.location.href);
-      return resolved.origin === window.location.origin;
+      return resolved.protocol === 'https:' || resolved.protocol === 'http:';
     } catch {
       return false;
     }
@@ -201,7 +229,7 @@ export class VinylAudioEngine {
 
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 1024;
-      this.analyser.smoothingTimeConstant = 0.72;
+      this.analyser.smoothingTimeConstant = 0.5;
       this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
 
       this.masterGain = this.ctx.createGain();
@@ -666,6 +694,32 @@ export class VinylAudioEngine {
         })
         .catch(() => {
           if (!this.isPlaying || this.inLeadIn) return;
+          const audioUrl = disc.audioUrl?.trim();
+          if (targetEl === this.analyzedAudio && audioUrl && !this.nonCorsUrls.has(audioUrl)) {
+            this.nonCorsUrls.add(audioUrl);
+            const plain = this.configureAudioElement(disc, false);
+            if (plain && plain === this.plainAudio) {
+              plain.muted = false;
+              plain
+                .play()
+                .then(() => {
+                  if (!this.isPlaying || this.inLeadIn) {
+                    plain.pause();
+                    return;
+                  }
+                  this.unlockedEls.add(plain);
+                  this.fallbackActive = false;
+                  this.emitStatus();
+                })
+                .catch(() => {
+                  if (!this.isPlaying || this.inLeadIn) return;
+                  this.fallbackActive = true;
+                  this.startSynth(disc.synthPreset ?? 0);
+                  this.emitStatus();
+                });
+              return;
+            }
+          }
           this.fallbackActive = true;
           this.startSynth(disc.synthPreset ?? 0);
           this.emitStatus();
@@ -735,11 +789,17 @@ export class VinylAudioEngine {
 
   public sampleReactiveLevels(): AudioReactiveLevels {
     if (!this.isPlaying || this.inLeadIn) {
-      this.avgBass *= 0.9;
-      this.smoothBass *= 0.86;
-      this.smoothMid *= 0.86;
-      this.smoothHigh *= 0.86;
-      this.beatPulse *= 0.82;
+      this.wasReactiveActive = false;
+      this.fastAvgBass *= 0.9;
+      this.slowAvgEnergy = this.slowAvgEnergy * 0.96 + 0.16 * 0.04;
+      this.prevBass = 0;
+      this.prevMid = 0;
+      this.prevHigh = 0;
+      this.smoothBass *= 0.84;
+      this.smoothMid *= 0.84;
+      this.smoothHigh *= 0.84;
+      this.beatPulse *= 0.78;
+      this.beatCooldown = 0;
       this.reactiveLevels.bass = this.smoothBass;
       this.reactiveLevels.mid = this.smoothMid;
       this.reactiveLevels.high = this.smoothHigh;
@@ -748,6 +808,7 @@ export class VinylAudioEngine {
       return this.reactiveLevels;
     }
 
+    let rawKick = 0;
     let rawBass = 0;
     let rawMid = 0;
     let rawHigh = 0;
@@ -756,21 +817,25 @@ export class VinylAudioEngine {
       this.analyser.getByteFrequencyData(this.freqData);
       const data = this.freqData;
 
-      // 44.1kHz / 1024 ≈ 43 Hz per bin
+      // 44.1-48kHz / 1024 ≈ 43-47 Hz per bin
       let sum = 0;
-      for (let i = 1; i <= 5; i++) sum += data[i];
-      rawBass = sum / (5 * 255);
+      for (let i = 1; i <= 3; i++) sum += data[i];
+      rawKick = sum / (3 * 255);
 
       sum = 0;
-      for (let i = 6; i <= 34; i++) sum += data[i];
-      rawMid = sum / (29 * 255);
+      for (let i = 1; i <= 6; i++) sum += data[i];
+      rawBass = sum / (6 * 255);
 
       sum = 0;
-      for (let i = 35; i <= 120; i++) sum += data[i];
-      rawHigh = sum / (86 * 255);
+      for (let i = 7; i <= 42; i++) sum += data[i];
+      rawMid = sum / (36 * 255);
+
+      sum = 0;
+      for (let i = 43; i <= 140; i++) sum += data[i];
+      rawHigh = sum / (98 * 255);
     }
 
-    // Fallback rhythmic pulse for external non-CORS MP3s that bypass WebAudio
+    // Fallback rhythmic pulse ONLY if the external host strictly blocks CORS
     const usingPlainExternal =
       Boolean(this.currentDisc?.audioUrl?.trim()) &&
       !this.fallbackActive &&
@@ -778,29 +843,83 @@ export class VinylAudioEngine {
 
     if (usingPlainExternal && rawBass + rawMid + rawHigh < 0.015) {
       const t = this.plainAudio.currentTime || performance.now() * 0.001;
-      const beatPhase = (t * 1.9) % 1; // ~114 BPM gentle pulse
-      const kick = Math.pow(Math.max(0, 1 - beatPhase * 2.8), 2);
+      const beatPhase = (t * 1.9) % 1;
+      const kick = Math.pow(Math.max(0, 1 - beatPhase * 3.0), 2);
       const wave = 0.5 + 0.5 * Math.sin(t * 5.2);
-      rawBass = 0.25 + kick * 0.65;
-      rawMid = 0.28 + wave * 0.4;
-      rawHigh = 0.2 + Math.pow(Math.max(0, Math.sin(t * 11.4)), 2) * 0.45;
+      rawKick = 0.2 + kick * 0.72;
+      rawBass = 0.22 + kick * 0.65;
+      rawMid = 0.24 + wave * 0.42;
+      rawHigh = 0.18 + Math.pow(Math.max(0, Math.sin(t * 11.4)), 2) * 0.48;
     }
 
-    // Adaptive baseline + sharp transient detection so loud tracks still blink cleanly on beats
-    this.avgBass = this.avgBass * 0.91 + rawBass * 0.09;
-    const onset = Math.max(0, (rawBass - this.avgBass * 1.03) * 4.5);
-    const highOnset = Math.max(0, rawHigh - this.smoothHigh * 1.15) * 2.4;
-    const targetPulse = Math.min(1, onset + highOnset * 0.45);
+    const nowMs = performance.now();
+    const instantEnergy = rawBass * 0.45 + rawMid * 0.35 + rawHigh * 0.2;
 
-    if (targetPulse > this.beatPulse) {
-      this.beatPulse = this.beatPulse * 0.35 + targetPulse * 0.65;
+    // On the first active frame of a track, seed baselines so there is no artificial transient spike
+    if (!this.wasReactiveActive) {
+      this.wasReactiveActive = true;
+      this.reactiveStartMs = nowMs;
+      this.prevBass = rawKick;
+      this.prevMid = rawMid;
+      this.prevHigh = rawHigh;
+      this.fastAvgBass = rawKick;
+      this.slowAvgEnergy = Math.max(0.16, instantEnergy);
+    }
+
+    // Gentle 650ms fade-in ramp at track start so sudden intros don't jolt the particles
+    const startRamp = Math.min(1, (nowMs - this.reactiveStartMs) / 650);
+
+    // Track overall song loudness without over-amplifying quiet silence/noise
+    this.slowAvgEnergy = Math.max(0.1, this.slowAvgEnergy * 0.985 + instantEnergy * 0.015);
+    const normFactor = Math.min(1.85, Math.max(0.75, 0.24 / this.slowAvgEnergy));
+    const silenceGate = instantEnergy < 0.025 ? instantEnergy / 0.025 : 1;
+
+    // Spectral flux transient detection (kicks, snares, and crisp hi-hats)
+    this.fastAvgBass = this.fastAvgBass * 0.85 + rawKick * 0.15;
+    const kickSurge = Math.max(0, rawKick - this.prevBass * 0.97) * 4.4;
+    const bassAboveAvg = Math.max(0, rawKick - this.fastAvgBass * 1.05) * 4.8;
+    const midSnap = Math.max(0, rawMid - this.prevMid) * 3.2;
+    const highSnap = Math.max(0, rawHigh - this.prevHigh) * 2.8;
+
+    this.prevBass = rawKick;
+    this.prevMid = rawMid;
+    this.prevHigh = rawHigh;
+
+    const rawTransient = Math.min(
+      1,
+      (bassAboveAvg * 0.9 + kickSurge * 0.55 + midSnap * 0.42 + highSnap * 0.22) *
+        normFactor *
+        0.64 *
+        silenceGate *
+        startRamp
+    );
+
+    if (this.beatCooldown > 0) this.beatCooldown--;
+    if (rawTransient > 0.24 && this.beatCooldown === 0 && rawTransient > this.beatPulse * 0.88) {
+      const nextPeak = Math.min(1, 0.32 + rawTransient * 0.68);
+      this.beatPulse = this.beatPulse * 0.5 + nextPeak * 0.5;
+      this.beatCooldown = 8; // ~130ms spacing for crisp yet graceful beat swells
     } else {
-      this.beatPulse *= 0.85;
+      this.beatPulse = Math.max(this.beatPulse * 0.85, rawTransient * 0.44);
     }
 
-    this.smoothBass = this.smoothBass * 0.62 + Math.min(1, rawBass * 1.35) * 0.38;
-    this.smoothMid = this.smoothMid * 0.65 + Math.min(1, rawMid * 1.55) * 0.35;
-    this.smoothHigh = this.smoothHigh * 0.6 + Math.min(1, rawHigh * 1.85) * 0.4;
+    const targetBass = Math.min(1, rawBass * 1.22 * normFactor * startRamp);
+    const targetMid = Math.min(1, rawMid * 1.38 * normFactor * startRamp);
+    const targetHigh = Math.min(1, rawHigh * 1.65 * normFactor * startRamp);
+
+    // Balanced musical envelope: clear swell on beats, smooth fade out
+    this.smoothBass =
+      targetBass > this.smoothBass
+        ? this.smoothBass * 0.52 + targetBass * 0.48
+        : this.smoothBass * 0.82 + targetBass * 0.18;
+    this.smoothMid =
+      targetMid > this.smoothMid
+        ? this.smoothMid * 0.54 + targetMid * 0.46
+        : this.smoothMid * 0.83 + targetMid * 0.17;
+    this.smoothHigh =
+      targetHigh > this.smoothHigh
+        ? this.smoothHigh * 0.48 + targetHigh * 0.52
+        : this.smoothHigh * 0.82 + targetHigh * 0.18;
 
     this.reactiveLevels.bass = this.smoothBass;
     this.reactiveLevels.mid = this.smoothMid;
