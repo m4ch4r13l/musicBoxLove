@@ -97,6 +97,10 @@ function buildValidatedPayload(
   const normalized = normalizeConfig(config);
   const safeDiscs = normalized.discs.slice(0, 12).map(sanitizeDiscForCloud);
 
+  const safeFramePhotoUrl = normalized.framePhotoUrl?.startsWith('blob:')
+    ? ''
+    : clampString(normalized.framePhotoUrl, 1024);
+
   return {
     clientLabel: clampString(clientLabel || normalized.title, 120),
     eyebrow: clampString(normalized.eyebrow, 120),
@@ -105,6 +109,7 @@ function buildValidatedPayload(
     signature: clampString(normalized.signature, 120),
     finish: normalized.finish ?? 'walnut',
     environment: normalized.environment ?? 'valley',
+    framePhotoUrl: safeFramePhotoUrl,
     discs: safeDiscs,
     isPublished: Boolean(isPublished),
   };
@@ -142,6 +147,7 @@ export async function loadGiftById(giftId: string): Promise<CloudGiftRecord | nu
         signature: data.signature,
         finish: data.finish,
         environment: data.environment,
+        framePhotoUrl: data.framePhotoUrl,
         discs: data.discs,
       }),
       updatedAtMs:
@@ -178,6 +184,7 @@ export function subscribeMyGifts(
             signature: data.signature,
             finish: data.finish,
             environment: data.environment,
+            framePhotoUrl: data.framePhotoUrl,
             discs: data.discs,
           }),
           updatedAtMs:
@@ -399,6 +406,22 @@ export function buildMergedMediaLibrary(
           originLabel: giftName,
         });
       }
+    }
+    const giftFramePhoto = gift.config.framePhotoUrl;
+    if (giftFramePhoto && /^https?:\/\//i.test(giftFramePhoto) && !seenCover.has(giftFramePhoto)) {
+      seenCover.add(giftFramePhoto);
+      merged.push({
+        id: `gift-frame-${gift.id}`,
+        ownerId: gift.ownerId,
+        kind: 'cover',
+        title: `Foto del cuadro: ${giftName}`,
+        fileName: 'cuadro-foto',
+        fileSize: 0,
+        url: giftFramePhoto,
+        updatedAtMs: gift.updatedAtMs,
+        source: 'gift',
+        originLabel: giftName,
+      });
     }
   }
 

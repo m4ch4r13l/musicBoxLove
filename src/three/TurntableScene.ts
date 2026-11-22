@@ -1098,6 +1098,10 @@ export class TurntableScene {
     this.applyEnvironmentStyle(style);
   }
 
+  public setFramePhoto(photoUrl: string): void {
+    this.envController.setFramePhoto(photoUrl);
+  }
+
   private applyEnvironmentStyle(style: EnvironmentStyle): void {
     if (this.scene.background instanceof THREE.Color) {
       this.scene.background.setHex(style.fogColor);

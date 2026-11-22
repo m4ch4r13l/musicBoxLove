@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildPhotoFrameProp } from './photoFrameProp';
 
 type Disposable = { dispose: () => void };
 
@@ -666,7 +667,8 @@ function createClinkerRowboatGeometries(): {
 // =========================================================
 function buildRowboatAndDateProps(
   maxAnisotropy: number,
-  disposables: Disposable[]
+  disposables: Disposable[],
+  photoTexture: THREE.Texture
 ): THREE.Group {
   const boat = new THREE.Group();
 
@@ -1214,6 +1216,12 @@ function buildRowboatAndDateProps(
     boat.add(rs, bud);
   });
 
+  // Wooden photo frame resting on the center bench inside the rowboat (rocks with the waves)
+  const photoFrame = buildPhotoFrameProp(photoTexture, maxAnisotropy, disposables);
+  photoFrame.position.set(-4.15, 0, 1.15);
+  photoFrame.rotation.y = 0.3;
+  boat.add(photoFrame);
+
   // 6. CAGED BRASS & GLASS BOW STORM LANTERN + WIRED FAIRY LIGHTS ALONG GUNWALES
   const postBaseY = hullProfileAt(17.2).sheerY;
   const postGeo = new THREE.CylinderGeometry(0.16, 0.2, 2.35, 7);
@@ -1385,7 +1393,8 @@ export interface BoatPlatformMotion {
 
 export function buildOceanDateEnvironment(
   maxAnisotropy: number,
-  disposables: Disposable[]
+  disposables: Disposable[],
+  photoTexture: THREE.Texture
 ): {
   group: THREE.Group;
   oceanMat: THREE.ShaderMaterial;
@@ -1548,7 +1557,7 @@ export function buildOceanDateEnvironment(
   group.add(oceanMesh);
 
   // 2. Realistic Clinker Wooden Rowboat centered under turntable (center bench flush at y = -0.002)
-  const rowboat = buildRowboatAndDateProps(maxAnisotropy, disposables);
+  const rowboat = buildRowboatAndDateProps(maxAnisotropy, disposables, photoTexture);
   rowboat.rotation.y = BOAT_YAW;
   group.add(rowboat);
 

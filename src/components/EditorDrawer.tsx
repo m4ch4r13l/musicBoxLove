@@ -51,6 +51,7 @@ interface EditorDrawerProps {
   mediaLibrary: CloudMediaAsset[];
   cloudSaving: boolean;
   uploadState: { discIndex: number; kind: 'audio' | 'cover'; progress: number } | null;
+  frameUploadProgress: number | null;
   onClose: () => void;
   onUpdateConfig: (next: TurntableConfig) => void;
   onSelectDisc: (index: number) => void;
@@ -71,6 +72,7 @@ interface EditorDrawerProps {
   onDeleteCloudGift: (giftId: string) => void;
   onDeleteMediaAsset: (mediaId: string) => void;
   onUploadDiscMedia: (discIndex: number, kind: 'audio' | 'cover', file: File) => void;
+  onUploadFramePhoto: (file: File) => void;
 }
 
 export function EditorDrawer({
@@ -86,6 +88,7 @@ export function EditorDrawer({
   mediaLibrary,
   cloudSaving,
   uploadState,
+  frameUploadProgress,
   onClose,
   onUpdateConfig,
   onSelectDisc,
@@ -106,12 +109,14 @@ export function EditorDrawer({
   onDeleteCloudGift,
   onDeleteMediaAsset,
   onUploadDiscMedia,
+  onUploadFramePhoto,
 }: EditorDrawerProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'discs' | 'cloud'>('discs');
   const [libraryPicker, setLibraryPicker] = useState<{
     discIndex: number;
     kind: 'audio' | 'cover';
   } | null>(null);
+  const [frameLibraryOpen, setFrameLibraryOpen] = useState(false);
   const [librarySearch, setLibrarySearch] = useState('');
   const [confirmDeleteGiftId, setConfirmDeleteGiftId] = useState<string | null>(null);
   const jsonInputRef = useRef<HTMLInputElement | null>(null);
@@ -349,6 +354,186 @@ export function EditorDrawer({
                   );
                 })}
               </div>
+            </div>
+
+            {/* 3D Photo Frame Customization */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-[#ffe0bd]/10">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <label className="text-[11px] font-medium text-[#b8a898]">
+                  Foto del cuadro 3D (aparece en todos los escenarios)
+                </label>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setFrameLibraryOpen((v) => !v)}
+                    className="inline-flex items-center gap-1 text-[10px] text-[#f7efe6] hover:text-[#e89f65] hover:underline cursor-pointer"
+                  >
+                    <Library className="w-3 h-3 text-[#e89f65]" />
+                    <span>Ya subidas ({coverAssets.length})</span>
+                  </button>
+                  <label className="inline-flex items-center gap-1 text-[10px] text-[#e89f65] hover:underline cursor-pointer">
+                    <CloudUpload className="w-3 h-3" />
+                    <span>Subir foto</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (!user) {
+                            setActiveTab('cloud');
+                          }
+                          onUploadFramePhoto(file);
+                        }
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  <label className="inline-flex items-center gap-1 text-[10px] text-[#b8a898] hover:text-[#f7efe6] hover:underline cursor-pointer">
+                    <FolderOpen className="w-3 h-3" />
+                    <span>Probar local</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          updateField('framePhotoUrl', URL.createObjectURL(file));
+                        }
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <div className="w-11 h-14 rounded-md overflow-hidden bg-[#221a15] border border-[#ffe0bd]/15 shrink-0 grid place-items-center">
+                  {config.framePhotoUrl ? (
+                    <img
+                      src={config.framePhotoUrl}
+                      alt="Vista previa del cuadro"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <ImageIcon className="w-4 h-4 text-[#e89f65]/70" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      maxLength={1024}
+                      placeholder="https://.../nuestra-foto.jpg o sube una imagen"
+                      value={config.framePhotoUrl ?? ''}
+                      onChange={(e) => updateField('framePhotoUrl', e.target.value)}
+                      className="flex-1 min-w-0 bg-[#221a15] border border-[#ffe0bd]/12 rounded-lg px-2.5 py-1.5 text-xs text-[#f7efe6] focus:outline-none focus:border-[#e89f65] select-text"
+                    />
+                    {config.framePhotoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => updateField('framePhotoUrl', '')}
+                        title="Quitar foto del cuadro"
+                        className="p-1.5 rounded-lg bg-[#221a15] border border-[#ffe0bd]/12 text-[#b8a898] hover:text-red-400 cursor-pointer shrink-0"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {config.framePhotoUrl?.startsWith('blob:') && (
+                    <span className="text-[10px] text-[#b8a898]">
+                      Foto local solo para esta sesión. Usa “Subir foto” o una URL pública para compartir.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {frameUploadProgress !== null && (
+                <div className="space-y-1">
+                  <div className="w-full h-1.5 rounded-full bg-[#2a211b] overflow-hidden">
+                    <div
+                      className="h-full bg-[#e89f65] transition-all"
+                      style={{ width: `${frameUploadProgress}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-[#e89f65]">
+                    Subiendo foto del cuadro... {frameUploadProgress}%
+                  </span>
+                </div>
+              )}
+
+              {frameLibraryOpen && (
+                <div className="rounded-lg bg-[#1c1512] border border-[#e89f65]/35 p-2.5 space-y-2">
+                  {!user ? (
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-[#b8a898]">
+                      <span>Inicia sesión con Google para ver tus fotos subidas.</span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('cloud')}
+                        className="text-[#e89f65] font-medium hover:underline shrink-0 cursor-pointer"
+                      >
+                        Ir a Nube
+                      </button>
+                    </div>
+                  ) : coverAssets.length === 0 ? (
+                    <p className="text-[11px] text-[#b8a898]">
+                      Aún no tienes fotos guardadas en tu biblioteca. Sube una imagen y podrás reutilizarla aquí.
+                    </p>
+                  ) : (
+                    <div className="max-h-36 overflow-y-auto custom-scroll space-y-1">
+                      {coverAssets.map((asset) => {
+                        const inUse = (config.framePhotoUrl ?? '') === asset.url;
+                        return (
+                          <div
+                            key={asset.id}
+                            className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-[11px] ${
+                              inUse
+                                ? 'bg-[#2a2018] border-[#e89f65]/50'
+                                : 'bg-[#16110e] border-[#ffe0bd]/8'
+                            }`}
+                          >
+                            <div className="min-w-0 flex items-center gap-2">
+                              {asset.url ? (
+                                <img
+                                  src={asset.url}
+                                  alt={asset.title}
+                                  className="w-7 h-7 rounded object-cover border border-white/15 shrink-0"
+                                />
+                              ) : (
+                                <ImageIcon className="w-4 h-4 text-[#e89f65] shrink-0" />
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-[#f7efe6] font-medium truncate">
+                                  {asset.title}
+                                </div>
+                                <div className="text-[10px] text-[#b8a898] truncate">
+                                  {asset.originLabel || asset.fileName}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateField('framePhotoUrl', asset.url);
+                                setFrameLibraryOpen(false);
+                              }}
+                              className={`px-2 py-1 rounded text-[10px] font-semibold shrink-0 cursor-pointer ${
+                                inUse
+                                  ? 'bg-[#e89f65]/20 text-[#e89f65]'
+                                  : 'bg-[#e89f65] text-[#1c120c] hover:bg-[#f2b07b]'
+                              }`}
+                            >
+                              {inUse ? 'En uso' : 'Usar'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Plinth Wood Finish */}

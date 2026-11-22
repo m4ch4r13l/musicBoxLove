@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildPhotoFrameProp } from './photoFrameProp';
 
 type Disposable = { dispose: () => void };
 
@@ -1259,7 +1260,8 @@ function buildMeadowTrees(
 
 export function buildValleyPicnicEnvironment(
   maxAnisotropy: number,
-  disposables: Disposable[]
+  disposables: Disposable[],
+  photoTexture: THREE.Texture
 ): { group: THREE.Group; grassMat: THREE.ShaderMaterial } {
   const group = new THREE.Group();
 
@@ -1378,6 +1380,12 @@ export function buildValleyPicnicEnvironment(
 
   const lanternGlow = new THREE.PointLight(0xffb563, 12, 16, 1.5);
   lanternGlow.position.set(-3.8, 1.2, -5.4);
+
+  // Wooden tabletop photo frame resting on the picnic blanket beside the turntable
+  const photoFrame = buildPhotoFrameProp(photoTexture, maxAnisotropy, disposables);
+  photoFrame.position.set(4.15, 0, -2.15);
+  photoFrame.rotation.y = -0.45;
+  group.add(photoFrame);
   group.add(lanternGlow);
 
   // Woven Straw Sun Hat resting near right corner of blanket

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildPhotoFrameProp } from './photoFrameProp';
 
 type Disposable = { dispose: () => void };
 
@@ -1457,7 +1458,8 @@ function buildPottedStudioPlant(disposables: Disposable[]): THREE.Group {
 
 export function buildStudioEnvironment(
   maxAnisotropy: number,
-  disposables: Disposable[]
+  disposables: Disposable[],
+  photoTexture: THREE.Texture
 ): THREE.Group {
   const group = new THREE.Group();
 
@@ -1824,6 +1826,12 @@ export function buildStudioEnvironment(
   const coffee = new THREE.Mesh(coffeeGeo, coffeeMat);
   coffee.position.set(4.65, 0.99, 2.85);
   group.add(coffee);
+
+  // Wooden photo frame standing on the studio desk beside the turntable
+  const photoFrame = buildPhotoFrameProp(photoTexture, maxAnisotropy, disposables);
+  photoFrame.position.set(3.85, 0, -2.85);
+  photoFrame.rotation.y = -0.4;
+  group.add(photoFrame);
 
   // =========================================================
   // 5. TRUE-SCALE FLOOR INSTRUMENTS & CABINETS (FLOOR_Y = -7.8)

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildPhotoFrameProp } from './photoFrameProp';
 
 type Disposable = { dispose: () => void };
 
@@ -439,7 +440,8 @@ function evaluateArcPoint(
 // =========================================================
 export function buildSpaceCosmosEnvironment(
   maxAnisotropy: number,
-  disposables: Disposable[]
+  disposables: Disposable[],
+  photoTexture: THREE.Texture
 ): {
   group: THREE.Group;
   updateSpace: (elapsed: number) => void;
@@ -1559,6 +1561,15 @@ export function buildSpaceCosmosEnvironment(
   group.add(asteroidOrbitGroup);
   disposables.push(asteroidGeo, asteroidMat);
 
+  // 9. Exact same wooden photo frame floating weightlessly in zero-gravity beside the turntable
+  const floatingPhotoFrame = buildPhotoFrameProp(photoTexture, maxAnisotropy, disposables, {
+    floating: true,
+  });
+  const frameBasePos = new THREE.Vector3(4.15, 1.55, -1.25);
+  floatingPhotoFrame.position.copy(frameBasePos);
+  floatingPhotoFrame.rotation.set(-0.06, -0.42, 0.03);
+  group.add(floatingPhotoFrame);
+
   // =========================================================
   // ANIMATION LOOP
   // =========================================================
@@ -1566,6 +1577,18 @@ export function buildSpaceCosmosEnvironment(
     starMat.uniforms.uTime.value = elapsed;
     starField.rotation.y = elapsed * 0.0045;
     nebulaCluster.rotation.y = elapsed * 0.003;
+
+    // Gentle zero-gravity bobbing, drift, and soft pitch/roll/yaw sway for the floating photo frame
+    floatingPhotoFrame.position.set(
+      frameBasePos.x + Math.cos(elapsed * 0.62) * 0.09,
+      frameBasePos.y + Math.sin(elapsed * 1.12) * 0.22,
+      frameBasePos.z + Math.sin(elapsed * 0.54) * 0.08
+    );
+    floatingPhotoFrame.rotation.set(
+      -0.06 + Math.sin(elapsed * 0.84) * 0.085,
+      -0.42 + Math.sin(elapsed * 0.48) * 0.14,
+      0.02 + Math.cos(elapsed * 0.72) * 0.075
+    );
 
     // Gentle planet rotation + shepherd moon orbits
     planet.rotation.y = elapsed * 0.04;

@@ -26,6 +26,7 @@ export interface TurntableConfig {
   signature: string;
   finish?: PlinthFinish;
   environment?: SceneEnvironment;
+  framePhotoUrl?: string;
   discs: VinylDisc[];
 }
 

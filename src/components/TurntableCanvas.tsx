@@ -23,6 +23,7 @@ interface TurntableCanvasProps {
   rpm: RpmMode;
   finish: PlinthFinish;
   environment: SceneEnvironment;
+  framePhotoUrl: string;
   dustCoverOpen: boolean;
   cameraPreset: CameraPreset;
   presetRequestTick: number;
@@ -43,6 +44,7 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
       rpm,
       finish,
       environment,
+      framePhotoUrl,
       dustCoverOpen,
       cameraPreset,
       presetRequestTick,
@@ -145,6 +147,10 @@ export const TurntableCanvas = forwardRef<TurntableCanvasHandle, TurntableCanvas
   useEffect(() => {
     sceneRef.current?.setEnvironment(environment);
   }, [environment]);
+
+  useEffect(() => {
+    sceneRef.current?.setFramePhoto(framePhotoUrl);
+  }, [framePhotoUrl]);
 
   useEffect(() => {
     sceneRef.current?.setDustCoverOpen(dustCoverOpen);

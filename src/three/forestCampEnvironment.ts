@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildPhotoFrameProp } from './photoFrameProp';
 
 type Disposable = { dispose: () => void };
 
@@ -1049,7 +1050,8 @@ function buildCampingTent(disposables: Disposable[]): THREE.Group {
 // =========================================================
 export function buildForestCampEnvironment(
   maxAnisotropy: number,
-  disposables: Disposable[]
+  disposables: Disposable[],
+  photoTexture: THREE.Texture
 ): { group: THREE.Group; fireMat: THREE.ShaderMaterial; fireLight: THREE.PointLight } {
   const group = new THREE.Group();
 
@@ -1081,6 +1083,12 @@ export function buildForestCampEnvironment(
 
   // 3. Cozy camp props on the picnic table & ground
   group.add(buildTabletopCampProps(disposables));
+
+  // Wooden photo frame standing on the rustic wooden picnic table
+  const photoFrame = buildPhotoFrameProp(photoTexture, maxAnisotropy, disposables);
+  photoFrame.position.set(-4.35, 0, 1.05);
+  photoFrame.rotation.y = 0.46;
+  group.add(photoFrame);
 
   // 4. Crackling campfire + stone ring + log seating (left-back clearing)
   const { group: campfire, fireMat, fireLight } = buildCampfireSite(

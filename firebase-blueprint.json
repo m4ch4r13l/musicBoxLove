@@ -48,6 +48,11 @@
           "description": "3D surrounding environment preset.",
           "enum": ["valley", "forest", "ocean", "space", "studio"]
         },
+        "framePhotoUrl": {
+          "type": "string",
+          "description": "Optional photo URL displayed inside the 3D picture frame across all environments.",
+          "maxLength": 1024
+        },
         "discs": {
           "type": "array",
           "description": "Ordered list of 1 to 12 vinyl discs included in the gift."

@@ -64,6 +64,7 @@ export default function App() {
     kind: 'audio' | 'cover';
     progress: number;
   } | null>(null);
+  const [frameUploadProgress, setFrameUploadProgress] = useState<number | null>(null);
 
   const mediaLibrary = useMemo(
     () => buildMergedMediaLibrary(libraryItems, cloudGifts),
@@ -546,6 +547,62 @@ export default function App() {
     [user, mediaLibrary, activeGiftId, clientLabel, config.title, config.discs, showToast]
   );
 
+  const handleUploadFramePhoto = useCallback(
+    async (file: File) => {
+      if (!user) {
+        showToast('Inicia sesión con Google en “Nube” para subir fotos a la nube');
+        return;
+      }
+
+      const duplicate = findDuplicateMediaAsset(mediaLibrary, 'cover', file);
+      if (duplicate) {
+        setConfig((prev) => ({ ...prev, framePhotoUrl: duplicate.url }));
+        showToast('Foto ya subida anteriormente: reutilizada sin duplicar en Cloudinary');
+        return;
+      }
+
+      const targetGift = activeGiftId.trim() || sanitizeGiftId(clientLabel || config.title);
+      if (!activeGiftId.trim()) {
+        setActiveGiftId(targetGift);
+      }
+
+      setFrameUploadProgress(0);
+      try {
+        const downloadUrl = await uploadClientMedia({
+          ownerId: user.uid,
+          giftId: targetGift,
+          file,
+          kind: 'cover',
+          onProgress: (progress) => setFrameUploadProgress(progress),
+        });
+
+        saveMediaLibraryItem({
+          ownerId: user.uid,
+          kind: 'cover',
+          title: file.name.replace(/\.[^.]+$/, '') || 'Foto del cuadro',
+          fileName: file.name,
+          fileSize: file.size,
+          url: downloadUrl,
+        }).catch((err) => {
+          console.error('No se pudo registrar foto del cuadro en biblioteca:', err);
+        });
+
+        setConfig((prev) => ({ ...prev, framePhotoUrl: downloadUrl }));
+        showToast('Foto del cuadro subida y guardada en tu biblioteca');
+      } catch (err) {
+        console.error(err);
+        showToast(
+          err instanceof Error && err.message
+            ? err.message
+            : 'No se pudo subir la foto del cuadro'
+        );
+      } finally {
+        setFrameUploadProgress(null);
+      }
+    },
+    [user, mediaLibrary, activeGiftId, clientLabel, config.title, showToast]
+  );
+
   const handleExportJson = useCallback(() => {
     const blob = new Blob([JSON.stringify(config, null, 2)], {
       type: 'application/json',
@@ -607,6 +664,7 @@ export default function App() {
           rpm={rpm}
           finish={config.finish ?? 'walnut'}
           environment={config.environment ?? 'valley'}
+          framePhotoUrl={config.framePhotoUrl ?? ''}
           dustCoverOpen={dustCoverOpen}
           cameraPreset={cameraPreset}
           presetRequestTick={presetRequestTick}
@@ -770,6 +828,7 @@ export default function App() {
         mediaLibrary={mediaLibrary}
         cloudSaving={cloudSaving}
         uploadState={uploadState}
+        frameUploadProgress={frameUploadProgress}
         onClose={() => setEditorOpen(false)}
         onUpdateConfig={setConfig}
         onSelectDisc={handleSelectDisc}
@@ -794,6 +853,7 @@ export default function App() {
         onDeleteCloudGift={handleDeleteCloudGift}
         onDeleteMediaAsset={handleDeleteMediaAsset}
         onUploadDiscMedia={handleUploadDiscMedia}
+        onUploadFramePhoto={handleUploadFramePhoto}
         />
       )}
     </main>

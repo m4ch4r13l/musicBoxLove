@@ -50,6 +50,7 @@ export const DEFAULT_CONFIG: TurntableConfig = {
   signature: 'Siempre tuyo',
   finish: 'walnut',
   environment: 'valley',
+  framePhotoUrl: '',
   discs: [
     {
       id: 'disc-impacto',
@@ -131,6 +132,7 @@ export function normalizeConfig(raw: Partial<TurntableConfig> | null | undefined
     signature: typeof raw.signature === 'string' ? raw.signature : base.signature,
     finish,
     environment,
+    framePhotoUrl: typeof raw.framePhotoUrl === 'string' ? raw.framePhotoUrl : '',
     discs,
   };
 }
@@ -139,6 +141,7 @@ export function encodeConfigToBase64(obj: TurntableConfig): string {
   // Strip transient blob: URLs when generating shareable gift links
   const clean: TurntableConfig = {
     ...obj,
+    framePhotoUrl: obj.framePhotoUrl?.startsWith('blob:') ? '' : obj.framePhotoUrl ?? '',
     discs: obj.discs.map((d) => ({
       ...d,
       audioUrl: d.audioUrl.startsWith('blob:') ? '' : d.audioUrl,
@@ -217,6 +220,7 @@ export function saveDraftConfig(config: TurntableConfig): void {
   try {
     const clean: TurntableConfig = {
       ...config,
+      framePhotoUrl: config.framePhotoUrl?.startsWith('blob:') ? '' : config.framePhotoUrl ?? '',
       discs: config.discs.map((d) => ({
         ...d,
         audioUrl: d.audioUrl.startsWith('blob:') ? '' : d.audioUrl,

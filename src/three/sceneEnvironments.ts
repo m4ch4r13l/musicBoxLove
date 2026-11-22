@@ -8,6 +8,7 @@ import {
 import { buildSpaceCosmosEnvironment } from './spaceCosmosEnvironment';
 import { buildStudioEnvironment } from './studioEnvironment';
 import { buildValleyPicnicEnvironment } from './valleyPicnicEnvironment';
+import { PhotoFrameTextureController } from './photoFrameProp';
 
 export interface EnvironmentStyle {
   fogColor: number;
@@ -151,6 +152,7 @@ export class SceneEnvironmentController {
 
   private groups = new Map<SceneEnvironment, THREE.Group>();
   private disposables: { dispose: () => void }[] = [];
+  private photoFrameController: PhotoFrameTextureController;
   private maxAnisotropy: number;
   private currentEnv: SceneEnvironment = 'valley';
 
@@ -160,6 +162,7 @@ export class SceneEnvironmentController {
     initialEnv: SceneEnvironment = 'valley'
   ) {
     this.maxAnisotropy = maxAnisotropy;
+    this.photoFrameController = new PhotoFrameTextureController(maxAnisotropy);
     this.rootGroup = new THREE.Group();
     parentScene.add(this.rootGroup);
 
@@ -312,6 +315,10 @@ export class SceneEnvironmentController {
     return style;
   }
 
+  public setFramePhoto(photoUrl: string): void {
+    this.photoFrameController.setPhotoUrl(photoUrl);
+  }
+
   public getPlatformMotion(): BoatPlatformMotion | null {
     return this.currentEnv === 'ocean' ? this.oceanPlatformMotion : null;
   }
@@ -363,7 +370,8 @@ export class SceneEnvironmentController {
   private buildValleyGroup(): THREE.Group {
     const { group, grassMat } = buildValleyPicnicEnvironment(
       this.maxAnisotropy,
-      this.disposables
+      this.disposables,
+      this.photoFrameController.texture
     );
     this.valleyGrassMat = grassMat;
     return group;
@@ -372,7 +380,8 @@ export class SceneEnvironmentController {
   private buildForestGroup(): THREE.Group {
     const { group, fireMat, fireLight } = buildForestCampEnvironment(
       this.maxAnisotropy,
-      this.disposables
+      this.disposables,
+      this.photoFrameController.texture
     );
     this.forestFireMat = fireMat;
     this.forestFireLight = fireLight;
@@ -381,7 +390,11 @@ export class SceneEnvironmentController {
 
   private buildOceanGroup(): THREE.Group {
     const { group, oceanMat, starMat, platformMotion, updateBoatMotion } =
-      buildOceanDateEnvironment(this.maxAnisotropy, this.disposables);
+      buildOceanDateEnvironment(
+        this.maxAnisotropy,
+        this.disposables,
+        this.photoFrameController.texture
+      );
     this.oceanMat = oceanMat;
     this.oceanStarMat = starMat;
     this.oceanPlatformMotion = platformMotion;
@@ -392,17 +405,23 @@ export class SceneEnvironmentController {
   private buildSpaceGroup(): THREE.Group {
     const { group, updateSpace } = buildSpaceCosmosEnvironment(
       this.maxAnisotropy,
-      this.disposables
+      this.disposables,
+      this.photoFrameController.texture
     );
     this.updateSpaceCosmos = updateSpace;
     return group;
   }
 
   private buildStudioGroup(): THREE.Group {
-    return buildStudioEnvironment(this.maxAnisotropy, this.disposables);
+    return buildStudioEnvironment(
+      this.maxAnisotropy,
+      this.disposables,
+      this.photoFrameController.texture
+    );
   }
 
   public dispose(): void {
+    this.photoFrameController.dispose();
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
     this.groups.clear();
